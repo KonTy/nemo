@@ -34,6 +34,7 @@
 #include <math.h>
 #include <unistd.h>
 #include <sys/types.h>
+#include <fcntl.h>
 #include <stdlib.h>
 #include <errno.h>
 
@@ -4566,6 +4567,29 @@ copy_move_file (CopyMoveJob *copy_job,
 			g_file_copy_attributes (src, dest,
 			                        flags | G_FILE_COPY_ALL_METADATA,
 			                        job->cancellable, NULL);
+		}
+
+		/* Flush the destination file data to disk and release its
+		 * pages from the page cache. This prevents dirty page
+		 * accumulation when copying many large files to a slow device
+		 * (e.g. USB), which can cause the kernel's dirty_ratio to be
+		 * exceeded, blocking all writes and causing the transfer to
+		 * appear locked up. fdatasync is used instead of fsync since
+		 * we only need to guarantee the data is on disk, not the
+		 * metadata. POSIX_FADV_DONTNEED then tells the kernel it can
+		 * reclaim the page cache pages used by this file.
+		 * See: https://github.com/linuxmint/nemo/issues/3710 */
+		if (!copy_job->is_move && !same_fs) {
+			char *dest_path = g_file_get_path (dest);
+			if (dest_path != NULL) {
+				int fd = open (dest_path, O_RDONLY);
+				if (fd >= 0) {
+					fdatasync (fd);
+					posix_fadvise (fd, 0, 0, POSIX_FADV_DONTNEED);
+					close (fd);
+				}
+				g_free (dest_path);
+			}
 		}
 
 		transfer_info->num_files ++;
