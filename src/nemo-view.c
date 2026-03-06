@@ -11359,15 +11359,21 @@ nemo_view_class_init (NemoViewClass *klass)
 	 * After startup, nemo_keybindings_apply_all() will re-apply these. */
 	if (nemo_keybinding_settings != NULL) {
 		g_autofree gchar *trash_accel = g_settings_get_string (nemo_keybinding_settings, "trash");
+		g_autofree gchar *trash_alt_accel = g_settings_get_string (nemo_keybinding_settings, "trash-alt");
 		g_autofree gchar *delete_accel = g_settings_get_string (nemo_keybinding_settings, "delete-permanently");
-		guint trash_key = 0, delete_key = 0;
-		GdkModifierType trash_mods = 0, delete_mods = 0;
+		guint trash_key = 0, trash_alt_key = 0, delete_key = 0;
+		GdkModifierType trash_mods = 0, trash_alt_mods = 0, delete_mods = 0;
 
 		gtk_accelerator_parse (trash_accel, &trash_key, &trash_mods);
+		gtk_accelerator_parse (trash_alt_accel, &trash_alt_key, &trash_alt_mods);
 		gtk_accelerator_parse (delete_accel, &delete_key, &delete_mods);
 
 		if (trash_key != 0) {
 			gtk_binding_entry_add_signal (binding_set, trash_key, trash_mods,
+			                              "trash", 0);
+		}
+		if (trash_alt_key != 0) {
+			gtk_binding_entry_add_signal (binding_set, trash_alt_key, trash_alt_mods,
 			                              "trash", 0);
 		}
 		if (delete_key != 0) {

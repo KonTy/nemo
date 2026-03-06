@@ -100,6 +100,7 @@ const NemoKeybindingEntry nemo_keybinding_entries[] = {
 
 	/* File Operations — binding-set entries (unified from nemo-view.c) */
 	{ "trash",                 NULL,                                        N_("Move to Trash"),              N_("File Operations"), "Delete",             "NemoView", "trash" },
+	{ "trash-alt",             NULL,                                        N_("Move to Trash (alternate)"),  N_("File Operations"), "",                   "NemoView", "trash" },
 	{ "delete-permanently",    NULL,                                        N_("Delete Permanently"),         N_("File Operations"), "<Shift>Delete",      "NemoView", "delete" },
 
 	/* Clipboard */

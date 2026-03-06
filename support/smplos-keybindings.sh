@@ -24,8 +24,9 @@ gsettings set $SCHEMA move-to-other-pane "F6"
 # F7 = New Folder (was: Ctrl+Shift+N)
 gsettings set $SCHEMA new-folder "F7"
 
-# F8 = Move to Trash (was: Delete)
+# F8 = Move to Trash (was: Delete), keep Delete as alternate
 gsettings set $SCHEMA trash "F8"
+gsettings set $SCHEMA trash-alt "Delete"
 
 # Alt+F7 = Search (was: Ctrl+F)
 gsettings set $SCHEMA search "<Alt>F7"
