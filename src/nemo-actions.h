@@ -46,6 +46,9 @@
 #define NEMO_ACTION_SHOW_HIDE_MENUBAR "Show Hide Menubar"
 #define NEMO_ACTION_SHOW_HIDE_LOCATION_BAR "Show Hide Location Bar"
 #define NEMO_ACTION_SHOW_HIDE_EXTRA_PANE "Show Hide Extra Pane"
+#define NEMO_ACTION_SHOW_HIDE_PREVIEW_PANE "Show Hide Preview Pane"
+#define NEMO_ACTION_PREVIEW_PANE_GROW "Preview Pane Grow"
+#define NEMO_ACTION_PREVIEW_PANE_SHRINK "Preview Pane Shrink"
 #define NEMO_ACTION_GO_TO_BURN_CD "Go to Burn CD"
 #define NEMO_ACTION_EDIT_LOCATION "Edit Location"
 #define NEMO_ACTION_COMPACT_VIEW "CompactView"
@@ -54,6 +57,8 @@
 #define NEMO_ACTION_GO_HOME "Home"
 #define NEMO_ACTION_ADD_BOOKMARK "Add Bookmark"
 #define NEMO_ACTION_EDIT_BOOKMARKS "Edit Bookmarks"
+#define NEMO_ACTION_BOOKMARK_PICKER "Bookmark Picker"
+#define NEMO_ACTION_BOOKMARK_PICKER_OTHER "Bookmark Picker Other Pane"
 #define NEMO_ACTION_HOME "Home"
 #define NEMO_ACTION_ZOOM_IN "Zoom In"
 #define NEMO_ACTION_ZOOM_OUT "Zoom Out"
@@ -80,6 +85,7 @@
 #define NEMO_ACTION_CUT "Cut"
 #define NEMO_ACTION_LOCATION_CUT "LocationCut"
 #define NEMO_ACTION_COPY "Copy"
+#define NEMO_ACTION_COPY_PATH "Copy Path"
 #define NEMO_ACTION_LOCATION_COPY "LocationCopy"
 #define NEMO_ACTION_PASTE "Paste"
 #define NEMO_ACTION_PASTE_FILES_INTO "Paste Files Into"
@@ -162,6 +168,8 @@
 #define NEMO_ACTION_DESKTOP_OVERLAY "Desktop Overlay"
 
 #define NEMO_ACTION_SIDEBAR_REMOVE "Remove Bookmark"
+#define NEMO_ACTION_SIDEBAR_REMOVE_ALL_BOOKMARKS "Remove All Bookmarks"
+#define NEMO_ACTION_SIDEBAR_CLEAR_RECENT "Clear Recent"
 #define NEMO_ACTION_SIDEBAR_DETECT_MEDIA "Detect Media"
 
 typedef struct
@@ -193,6 +201,9 @@ static const ConfigurableMenuItemInfo CONFIGURABLE_MENU_ITEM_INFO [] = {
 
     { NEMO_ACTION_COPY, "selection_menu__copy_check",
      "/selection/File Clipboard Actions/Copy", "selection-menu-copy" },
+
+    { NEMO_ACTION_COPY_PATH, "selection_menu__copy_path_check",
+     "/selection/File Clipboard Actions/Copy Path", "selection-menu-copy-path" },
 
     { NEMO_ACTION_PASTE_FILES_INTO, "selection_menu__paste_check",
      "/selection/File Clipboard Actions/Paste Files Into", "selection-menu-paste" },

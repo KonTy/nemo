@@ -41,6 +41,7 @@ nemoCommon_sources = [
   'nemo-icon-view.c',
   'nemo-image-properties-page.c',
   'nemo-interesting-folder-bar.c',
+  'nemo-keybindings.c',
   'nemo-list-model.c',
   'nemo-list-view.c',
   'nemo-location-bar.c',
@@ -53,6 +54,7 @@ nemoCommon_sources = [
   'nemo-places-sidebar.c',
   'nemo-plugin-manager.c',
   'nemo-previewer.c',
+  'nemo-preview-pane.c',
   'nemo-progress-info-widget.c',
   'nemo-progress-ui-handler.c',
   'nemo-properties-window.c',
@@ -111,6 +113,11 @@ endif
 
 if libexif_enabled
   nemo_deps += libexif
+endif
+
+if gstreamer_enabled
+  nemo_deps += gstreamer
+  nemo_deps += gstreamer_video
 endif
 
 if gtk_layer_shell_enabled

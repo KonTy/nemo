@@ -191,6 +191,53 @@ G_DEFINE_TYPE (NemoListView, nemo_list_view, NEMO_TYPE_VIEW);
 
 static gint click_policy = NEMO_CLICK_POLICY_SINGLE;
 
+static gboolean
+list_view_search_equal_func (GtkTreeModel *model,
+                             gint search_column,
+                             const gchar *key,
+                             GtkTreeIter *iter,
+                             gpointer user_data)
+{
+	gchar *name = NULL;
+	gchar *normalized_key = NULL;
+	gchar *case_normalized_key = NULL;
+	gchar *normalized_name = NULL;
+	gchar *case_normalized_name = NULL;
+	gboolean is_match = FALSE;
+
+	(void) user_data;
+
+	if (key == NULL || key[0] == '\0') {
+		return TRUE;
+	}
+
+	gtk_tree_model_get (model, iter, search_column, &name, -1);
+	if (name == NULL) {
+		return TRUE;
+	}
+
+	normalized_key = g_utf8_normalize (key, -1, G_NORMALIZE_ALL);
+	normalized_name = g_utf8_normalize (name, -1, G_NORMALIZE_ALL);
+
+	if (normalized_key != NULL && normalized_name != NULL) {
+		case_normalized_key = g_utf8_casefold (normalized_key, -1);
+		case_normalized_name = g_utf8_casefold (normalized_name, -1);
+
+		if (case_normalized_key != NULL && case_normalized_name != NULL) {
+			is_match = strstr (case_normalized_name, case_normalized_key) != NULL;
+		}
+	}
+
+	g_free (case_normalized_name);
+	g_free (normalized_name);
+	g_free (case_normalized_key);
+	g_free (normalized_key);
+	g_free (name);
+
+	/* GtkTreeView expects FALSE for a row that matches. */
+	return !is_match;
+}
+
 static const char * default_trash_visible_columns[] = {
 	"name", "size", "type", "trashed_on", "trash_orig_path", NULL
 };
@@ -1128,11 +1175,24 @@ button_press_callback (GtkWidget *widget, GdkEventButton *event, gpointer callba
 		return GDK_EVENT_PROPAGATE;
 	}
 
-    if (!nemo_view_get_active (NEMO_VIEW (view)) && gtk_tree_selection_count_selected_rows (selection) > 0) {
-        NemoWindowSlot *slot = nemo_view_get_nemo_window_slot (NEMO_VIEW (view));
-        nemo_window_slot_make_hosting_pane_active (slot);
-        return GDK_EVENT_STOP;
-    }
+	if (!nemo_view_get_active (NEMO_VIEW (view))) {
+		NemoWindowSlot *slot = nemo_view_get_nemo_window_slot (NEMO_VIEW (view));
+		nemo_window_slot_make_hosting_pane_active (slot);
+
+		/* Select and cursor the clicked file so the pane activates
+		 * with the right item highlighted. */
+		{
+			GtkTreePath *click_path = NULL;
+			if (gtk_tree_view_get_path_at_pos (tree_view, event->x, event->y,
+			                                   &click_path, NULL, NULL, NULL)) {
+				gtk_tree_selection_unselect_all (selection);
+				gtk_tree_selection_select_path (selection, click_path);
+				gtk_tree_view_set_cursor (tree_view, click_path, NULL, FALSE);
+				gtk_tree_path_free (click_path);
+			}
+		}
+		return GDK_EVENT_STOP;
+	}
 
 	nemo_list_model_set_drag_view
 		(NEMO_LIST_MODEL (gtk_tree_view_get_model (tree_view)),
@@ -2538,6 +2598,10 @@ create_and_set_up_tree_view (NemoListView *view)
 							NULL);
 
 	gtk_tree_view_set_enable_search (view->details->tree_view, TRUE);
+	gtk_tree_view_set_search_equal_func (view->details->tree_view,
+					     list_view_search_equal_func,
+					     view,
+					     NULL);
 
 	/* Don't handle backspace key. It's used to open the parent folder. */
 	binding_set = gtk_binding_set_by_class (GTK_WIDGET_GET_CLASS (view->details->tree_view));
@@ -4303,13 +4367,34 @@ nemo_list_view_end_loading (NemoView *view,
 {
 	NemoClipboardMonitor *monitor;
 	NemoClipboardInfo *info;
+	NemoListView *list_view;
 
-    set_ok_to_load_deferred_attrs (NEMO_LIST_VIEW (view), TRUE);
+	list_view = NEMO_LIST_VIEW (view);
+
+	set_ok_to_load_deferred_attrs (list_view, TRUE);
 
 	monitor = nemo_clipboard_monitor_get ();
 	info = nemo_clipboard_monitor_get_clipboard_info (monitor);
 
-	list_view_notify_clipboard_info (monitor, info, NEMO_LIST_VIEW (view));
+	list_view_notify_clipboard_info (monitor, info, list_view);
+
+	/* In split-pane mode, if nothing is selected after loading,
+	 * select and cursor the first row so there's always a visible
+	 * cursor in each pane. */
+	{
+		GtkTreeSelection *sel;
+		GtkTreeIter first;
+
+		sel = gtk_tree_view_get_selection (list_view->details->tree_view);
+		if (gtk_tree_selection_count_selected_rows (sel) == 0) {
+			GtkTreeModel *model = gtk_tree_view_get_model (list_view->details->tree_view);
+			if (model != NULL && gtk_tree_model_get_iter_first (model, &first)) {
+				GtkTreePath *path = gtk_tree_model_get_path (model, &first);
+				gtk_tree_view_set_cursor (list_view->details->tree_view, path, NULL, FALSE);
+				gtk_tree_path_free (path);
+			}
+		}
+	}
 }
 
 static const char *
