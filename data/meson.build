@@ -89,4 +89,11 @@ endforeach
 
 ################################################################################
 
+# Install udev rules for MTP device support (prevent gphoto2 conflicts)
+install_data('70-disable-gphoto-for-mtp.rules',
+  install_dir: join_paths(get_option('prefix'), 'lib', 'udev', 'rules.d')
+)
+
+################################################################################
+
 subdir('icons')

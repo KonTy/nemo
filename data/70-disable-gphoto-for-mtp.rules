@@ -1,0 +1,27 @@
+# Prevent gphoto2 from claiming MTP devices
+# This allows GVFS MTP backend (used by Nemo file manager) to access phones
+# without conflicts from competing USB device handlers.
+#
+# Issue: gphoto2 and KDE kiod6 would claim the USB device exclusively,
+# preventing libmtp from accessing it for MTP mounting.
+#
+# Solution: Clear ID_GPHOTO2 env var for common MTP devices.
+# This tells the system "this is not a PTP camera, it's an MTP device"
+
+# Samsung devices (common MTP phones)
+SUBSYSTEM=="usb", ATTR{idVendor}=="04e8", ENV{ID_GPHOTO2}="", ENV{ID_GPHOTO}=""
+
+# Google Pixel / Android generic
+SUBSYSTEM=="usb", ATTR{idVendor}=="18d1", ENV{ID_GPHOTO2}="", ENV{ID_GPHOTO}=""
+
+# HTC
+SUBSYSTEM=="usb", ATTR{idVendor}=="0bb4", ENV{ID_GPHOTO2}="", ENV{ID_GPHOTO}=""
+
+# LG
+SUBSYSTEM=="usb", ATTR{idVendor}=="1004", ENV{ID_GPHOTO2}="", ENV{ID_GPHOTO}=""
+
+# Sony/Ericsson
+SUBSYSTEM=="usb", ATTR{idVendor}=="0fce", ENV{ID_GPHOTO2}="", ENV{ID_GPHOTO}=""
+
+# Motorola
+SUBSYSTEM=="usb", ATTR{idVendor}=="22b8", ENV{ID_GPHOTO2}="", ENV{ID_GPHOTO}=""
