@@ -54,25 +54,19 @@ done
 # Change to parent directory and compress
 cd "$PARENT_DIR"
 
-# Show progress with zenity
-(
-    echo "# Compressing files..."
-    7z a -mx=9 "$ARCHIVE_NAME" "${ITEMS[@]}" 2>&1 | while IFS= read -r line; do
-        if [[ "$line" =~ ([0-9]+)% ]]; then
-            echo "${BASH_REMATCH[1]}"
-        fi
-    done
-    echo "100"
-) | zenity --progress \
+# Start a pulsating progress dialog (avoid running 7z twice)
+( while true; do echo "# Compressing files to $ARCHIVE_NAME..."; echo "50"; sleep 1; done ) | \
+    zenity --progress \
     --title="Creating Archive" \
     --text="Compressing files to $ARCHIVE_NAME..." \
-    --percentage=0 \
+    --pulsate \
     --auto-close 2>/dev/null &
 
 ZENITY_PID=$!
 
-# Run 7z compression
-7z a -mx=9 "$ARCHIVE_NAME" "${ITEMS[@]}" > /tmp/7z_output_$$.log 2>&1
+# Run 7z compression once and capture full log
+LOG_FILE="/tmp/7z_output_$$.log"
+/usr/bin/7z a -mx=9 "$ARCHIVE_NAME" "${ITEMS[@]}" > "$LOG_FILE" 2>&1
 EXIT_CODE=$?
 
 # Kill progress dialog
@@ -87,13 +81,24 @@ if [ $EXIT_CODE -eq 0 ]; then
         --text="Archive created successfully!\n\nFile: $ARCHIVE_NAME\nSize: $ARCHIVE_SIZE" 2>/dev/null || \
     notify-send "Compression Complete" "Archive created: $ARCHIVE_NAME ($ARCHIVE_SIZE)"
 else
-    # Show error
-    ERROR_MSG=$(tail -10 /tmp/7z_output_$$.log)
-    zenity --error \
+    # Show error with copyable text
+    ERROR_MSG=$(tail -50 "$LOG_FILE")
+    ERROR_DISPLAY="/tmp/7z_error_$$.txt"
+    {
+        echo "Compression failed for: $ARCHIVE_NAME"
+        echo ""
+        echo "Archive path: $ARCHIVE_PATH"
+        echo ""
+        echo "--- 7z output (last 50 lines) ---"
+        echo "$ERROR_MSG"
+    } > "$ERROR_DISPLAY"
+    zenity --text-info \
         --title="Compression Failed" \
-        --text="Failed to create archive.\n\nError:\n$ERROR_MSG" 2>/dev/null || \
-    notify-send "Compression Failed" "Could not create archive"
+        --filename="$ERROR_DISPLAY" \
+        --width=700 --height=420 \
+        --editable 2>/dev/null || \
+    notify-send "Compression Failed" "See $ERROR_DISPLAY for details"
 fi
 
 # Clean up temp log
-rm -f /tmp/7z_output_$$.log
+rm -f "$LOG_FILE"
