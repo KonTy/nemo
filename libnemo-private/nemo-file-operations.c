@@ -2736,6 +2736,21 @@ volume_mount_cb (GObject *source_object,
 					 g_file_test ("/usr/lib/gvfs/gvfsd-mtp", G_FILE_TEST_EXISTS) ||
 					 g_file_test ("/usr/libexec/gvfsd-mtp", G_FILE_TEST_EXISTS) ||
 					 g_file_test ("/usr/libexec/gvfs/gvfsd-mtp", G_FILE_TEST_EXISTS));
+				gboolean retry_attempted;
+
+				retry_attempted = GPOINTER_TO_INT (g_object_get_data (G_OBJECT (mount_op), "mtp-open-retry-attempted"));
+				if (open_failed && !retry_attempted) {
+					g_object_set_data (G_OBJECT (mount_op), "mtp-open-retry-attempted", GINT_TO_POINTER (1));
+					g_free (lower);
+					g_free (primary);
+					g_error_free (error);
+
+					/* Keep mount_op alive for the retried async request. */
+					g_object_ref (mount_op);
+					g_volume_mount (G_VOLUME (source_object), 0, mount_op, NULL, volume_mount_cb, mount_op);
+					g_object_unref (mount_op);
+					return;
+				}
 				g_free (lower);
 
 				if (needs_unlock) {
