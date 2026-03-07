@@ -331,11 +331,12 @@ action_about_nemo_callback (GtkAction *action,
 	date = g_date_time_new_now_local ();
 
 	gtk_show_about_dialog (GTK_WINDOW (user_data),
-			       "program-name", _("Nemo"),
+			       "program-name", _("smplos-nemo"),
 			       "version", VERSION,
-			       "comments", _("Nemo lets you organize "
+			       "comments", _("smplos-nemo lets you organize "
 					     "files and folders, both on "
-					     "your computer and online."),
+					     "your computer and online. "
+					     "It is a community-maintained fork of Nemo."),
 			       "license", license_trans,
 			       "wrap-license", TRUE,
 			      "logo-icon-name", "folder",

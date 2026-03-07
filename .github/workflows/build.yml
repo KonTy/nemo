@@ -4,9 +4,11 @@ on:
   push:
     branches:
       - master
+      - release
   pull_request:
     branches:
       - master
+      - release
   workflow_dispatch:
     inputs:
       debug_enabled:
@@ -22,11 +24,13 @@ jobs:
     if: github.event_name != 'issue_comment'
     uses: linuxmint/github-actions/.github/workflows/do-builds.yml@master
     with:
-      commit_id: master
+      commit_id: ${{ github.ref_name }}
       ############################## Comma separated list - like 'linuxmint/xapp, linuxmint/cinnamon-desktop'
       dependencies: linuxmint/xapp, linuxmint/cinnamon-desktop, linuxmint/cinnamon-translations
       codespell_ignore_words_list: nd
       codespell_ignore_files_list:
+      upload_artifacts: true
+      artifact_retention_days: 14
       ##############################
 
   # Generate test packages when /generate-test-packages is commented on a PR
