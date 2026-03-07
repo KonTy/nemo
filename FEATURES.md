@@ -1,6 +1,61 @@
-# smplos-nemo Features Tracking
+# smplos-nemo Features & Release Notes
 
-This document tracks which features in smplos-nemo are upstream (merged into linuxmint/nemo) and which are smplos-exclusive.
+**Current Version:** v1.0.3  
+**Release Date:** March 7, 2026
+
+---
+
+## v1.0.3 Release Highlights — MTP Support Hardened
+
+This release makes Android phone/tablet file transfer **production-ready** with zero configuration needed.
+
+### 🎯 Major Fixes in v1.0.3
+
+#### ✅ MTP Device Support — Fully Fixed
+
+**Problem Solved:**
+- Users experienced "Unable to open MTP device" errors when connecting Android phones
+- gphoto2 and KDE kiod6 daemons would claim USB devices exclusively, blocking MTP access
+- Manual udev rule editing was required to fix device conflicts
+
+**Solution Implemented:**
+- **Automatic Udev Rules** — `70-disable-gphoto-for-mtp.rules` bundled in package
+- **Device Coverage** — Samsung, Google Pixel, HTC, LG, Sony, Motorola built-in
+- **Retry Logic** — Automatic 2x retry on transient USB "device busy" errors
+- **Clear Errors** — User sees "Phone locked?", "Driver missing?", or "Device busy" with hints
+- **Zero Setup** — Rules deployed automatically on package install, no manual configuration
+
+**Tested & Verified:**
+- Samsung Galaxy S21 Ultra ✅
+- Google Pixel 6 ✅  
+- LG V60 ✅
+- Generic Android devices ✅
+
+#### ✅ Enhanced Error Handling
+
+**New MTP Error Messages:**
+```
+Mount failed: "Device is locked"
+→ Hint: Unlock your phone and try again
+
+Mount failed: "Unable to open MTP device" 
+→ Hint: Install libmtp package: pacman -S libmtp
+
+Mount failed: "Device busy - retrying..."
+→ Auto-retrying up to 2 times, then gives up with clear feedback
+```
+
+### 📦 Installation Improvements
+
+- **Arch Linux/AUR**: `yay -S nemo-smpl` (post-install hooks handle udev reload)
+- **Debian/Ubuntu**: .deb packages with automatic dependency resolution
+- **Source builds**: Meson installs rules to `/lib/udev/rules.d` automatically
+
+---
+
+## Feature Tracking
+
+This document tracks which features in smplos-nemo are upstream and which are smplos-exclusive.
 
 ## Upstream (Merged into linuxmint/nemo)
 
@@ -11,8 +66,8 @@ None yet. We're working on contributing suitable features upstream.
 These features are candidates for upstream contribution:
 
 - [ ] **MTP Device Support** — Better phone/tablet device detection and mounting with user-friendly hints
-  - Status: Under review / ready for PR
-  - Link: `src/nemo-places-sidebar.c`, `libnemo-private/nemo-file-operations.c`
+  - Status: Fixed & hardened in v1.0.3, ready for PR
+  - Link: `src/nemo-places-sidebar.c`, `libnemo-private/nemo-file-operations.c`, `data/70-disable-gphoto-for-mtp.rules`
   
 - [ ] **Preview Pane Improvements** — Enhanced image/video preview and EXIF support
   - Status: Evaluating upstream compatibility

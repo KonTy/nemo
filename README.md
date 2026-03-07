@@ -23,23 +23,109 @@ While we've contributed some improvements upstream, several features were reject
 
 ## Installation
 
-### From smplos Distribution
+### 🏠 For smplOS Users (Recommended)
+
+**Arch Linux / smplOS:**
 ```bash
-sudo pacman -S smplos-nemo
+sudo pacman -S nemo-smpl
 ```
 
-### Building from Source
+**AUR (Arch User Repository):**
+```bash
+yay -S nemo-smpl    # or paru -S nemo-smpl
+```
+The AUR package automatically configures MTP support and reloads udev rules on install.
+
+### 🐧 For Debian/Ubuntu Users
+
+Debian packages available at: [GitHub Releases](https://github.com/KonTy/nemo/releases)
+
+```bash
+# Download the latest .deb from releases, then:
+sudo dpkg -i nemo-smpl_1.0.3-1_amd64.deb
+sudo apt-get install -f  # Install any missing dependencies
+```
+
+### 🔨 Building from Source
+
+**Requirements:**
+- meson ≥ 0.56.0
+- gtk3-dev, gvfs-dev, libexif-dev, libx11-dev
+- gstreamer1.0-dev (for preview pane)
+- libosm-gps-map-dev (optional, for GPS preview)
+
+**Build:**
 ```bash
 git clone https://github.com/KonTy/nemo.git
 cd nemo
 meson build -Dsmplos_branding=true
-ninja -C build install
+ninja -C build
+sudo ninja -C build install
 ```
+
+### 📱 MTP Support (Android/Phone File Transfer)
+
+All installation methods automatically set up MTP device access. After installation:
+
+1. **Connect your Android phone via USB**
+2. **Enable "File Transfer" or "MTP" mode** on your phone (check Developer Options)
+3. **Open Nemo** — your phone appears in the sidebar under "Android Device" or similar
+4. **Click to mount** and browse files like a regular folder
+
+**Features:**
+- ✅ Drag & drop file transfers
+- ✅ No gphoto2 conflicts (camera app won't interfere)
+- ✅ Works with Samsung, Google Pixel, HTC, LG, Sony, Motorola, and more
+- ✅ Automatic retry on transient USB issues
+- ✅ Clear error messages if something goes wrong
+
+**Troubleshooting:**
+- Phone not showing up? Unlock your phone screen first (MTP requires unlocked device for security)
+- Still issues? Run `mtp-detect` in terminal to verify device compatibility
+- Try another MTP app? Use `sudo pacman -S android-file-transfer` as a fallback
+
+---
+
+## Release Notes — v1.0.3
+
+### 🎯 MTP Device Support - Fixed & Hardened
+
+Android phone and tablet support is now **production-ready**:
+
+**What's Fixed:**
+- ✅ **Automatic Retry Logic** — Handles transient USB device busy errors
+- ✅ **Udev Rule Integration** — Prevents gphoto2/KDE kiod6 from stealing USB device access
+- ✅ **Clear Error Messages** — Users know exactly why MTP failed and how to fix it
+- ✅ **Battery Status** — Shows device battery percentage in sidebar
+- ✅ **Drag & Drop** — Full file transfer support with progress indication
+
+**Technical Details:**
+- Added 70-disable-gphoto-for-mtp.rules to suppress competing device handlers
+- Covers Samsung, Google Pixel, HTC, LG, Sony, Motorola (major Android manufacturers)
+- Auto-deployed via package installation — no manual udev rule setup required
+- Tested with Samsung Galaxy S21 Ultra, Google Pixel 6, and LG V60
+
+**Before vs After:**
+| Issue | Before | After |
+|-------|--------|-------|
+| "Unable to open MTP device" errors | Manual udev rule editing | Automatic, bundled in package |
+| gphoto2 blocks MTP access | Need to disable gphoto2 daemon | Handled transparently by udev rules |
+| First mount fails sometimes | User frustrated, connection lost | Auto-retries up to 2x before giving up |
+| What went wrong? | Generic error message | Clear: "Phone locked", "Driver missing", "Device busy" |
+
+### Other Improvements in v1.0.3
+- Configurable keyboard shortcuts (Ctrl+Shift+K to edit)
+- GPS preview for geotagged photos (offline maps)
+- Archive browsing for ZIP/7z/TAR files
+- Performance improvements in large directory scanning
+- Substring search matching across filename, not just prefix
 
 ---
 
 Nemo — Original Project
 ========================
+
+**smplos-nemo** is a maintained fork of Nemo. Below is the original project history.
 
 Nemo is a free and open-source file manager for the Cinnamon desktop environment. 
 It is a fork of GNOME Files (formerly named Nautilus).
@@ -70,8 +156,79 @@ Developer Gwendal Le Bihan named the project "nemo" after Jules Verne's famous c
 
 ---
 
-smplos-nemo Features
-====================
+## smplos-nemo vs Stock Nemo: Feature Comparison
+
+| Feature | Stock Nemo | smplos-nemo | Status |
+|---------|-----------|------------|--------|
+| **File Management** | ✅ | ✅ | Both excellent |
+| **MTP (Android/Phone)** | ⚠️ Broken* | ✅ Working | **Fixed in smplos-nemo** |
+| **Preview Pane** | ❌ | ✅ | smplos-nemo exclusive |
+| **GPS Map Preview** | ❌ | ✅ | smplos-nemo exclusive |
+| **Archive Browsing** | ❌ | ✅ | smplos-nemo exclusive |
+| **Disk Usage Chart** | ❌ | ✅ | smplos-nemo exclusive |
+| **Configurable Shortcuts** | ❌ | ✅ | smplos-nemo exclusive |
+| **Substring Search** | Prefix only | Substring | smplos-nemo improved |
+| **Tab-based Panes** | ❌ | ✅ | smplos-nemo exclusive |
+| **GIO/GVFS Support** | ✅ | ✅ | Both |
+| **Open as Root** | ✅ | ✅ | Both |
+| **SSH/Remote Filesystems** | ✅ | ✅ | Both |
+
+*Stock Nemo has MTP support but users report frequent "Unable to mount" errors due to competing device handlers (gphoto2, KDE kiod6). smplos-nemo fixes this with automatic udev rules and retry logic.
+
+---
+
+Why Choose smplos-nemo?
+======================
+
+### 📸 Preview Pane
+
+See what you're opening **before you open it**. Toggle with **Alt+F3**:
+- **Images**: JPEG, PNG, WebP, TIFF with EXIF metadata
+- **Videos**: Frame preview + codec info + duration
+- **Audio**: Album art + metadata tags
+- **Documents**: Preview text files, see archive contents
+- **Maps**: Geotagged photos show location on interactive offline map
+
+### 🗂️ Archive Browsing
+
+Work with compressed files like regular folders:
+```bash
+# Instead of:
+1. Right-click → Extract here
+2. Navigate to extracted folder
+3. Delete archive
+
+# Now do:
+1. Double-click ZIP → Browse contents
+2. Drag files out to copy
+3. Close when done (archive unchanged)
+```
+
+### 📊 Disk Usage Analysis
+
+Understand where your disk space goes:
+- Interactive pie chart showing largest files/folders
+- Click segments to drill down into subdirectories  
+- Pareto analysis: find the 20% of files using 80% of space
+- Spot large logs, caches, or old backups instantly
+
+### ⌨️ Power User Keyboard Shortcuts
+
+Fully customizable — edit with **Ctrl+Shift+K**:
+- Remap common operations to your preferred keys
+- Navigate without touching the mouse
+- Example bindings: **Ctrl+D** (duplicate), **Ctrl+N** (new folder), **Shift+Del** (permanent delete)
+
+### 📱 Mobile Device Support (MTP) — Fixed
+
+Connect your Android phone/tablet and use it like a USB drive:
+- **No more "Unable to mount" errors** — automatic retry logic handles USB transients
+- **Works with major manufacturers** — Samsung, Google, HTC, LG, Sony, Motorola supported out-of-the-box
+- **Drag & drop transfers** — Copy files to/from phone with progress
+- **Battery indicator** — See device battery in sidebar
+- **No competing services** — Udev rules prevent gphoto2 from interfering
+
+---
 
 ## Preview Pane — Live File Preview & Metadata
 
