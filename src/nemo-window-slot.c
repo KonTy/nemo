@@ -304,6 +304,141 @@ create_nsr_box (void)
     return box;
 }
 
+static GtkWidget *
+create_mtp_unlock_box (void)
+{
+	GtkWidget *box;
+	GtkWidget *widget;
+	PangoAttrList *attrs;
+
+	box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 8);
+
+	widget = gtk_image_new_from_icon_name ("smartphone-symbolic", GTK_ICON_SIZE_DIALOG);
+	gtk_box_pack_start (GTK_BOX (box), widget, FALSE, FALSE, 0);
+
+	widget = gtk_label_new (_("Phone is locked"));
+	attrs = pango_attr_list_new ();
+	pango_attr_list_insert (attrs, pango_attr_size_new (18 * PANGO_SCALE));
+	gtk_label_set_attributes (GTK_LABEL (widget), attrs);
+	pango_attr_list_unref (attrs);
+	gtk_box_pack_start (GTK_BOX (box), widget, FALSE, FALSE, 0);
+
+	widget = gtk_label_new (_("Unlock your phone and keep it awake.\nNemo will reconnect automatically."));
+	gtk_label_set_justify (GTK_LABEL (widget), GTK_JUSTIFY_CENTER);
+	gtk_box_pack_start (GTK_BOX (box), widget, FALSE, FALSE, 0);
+
+	gtk_widget_set_halign (box, GTK_ALIGN_CENTER);
+	gtk_widget_set_valign (box, GTK_ALIGN_CENTER);
+
+	gtk_widget_show_all (box);
+	gtk_widget_set_no_show_all (box, TRUE);
+	gtk_widget_hide (box);
+
+	return box;
+}
+
+static gboolean
+uri_is_mtp_root (const char *uri)
+{
+	const char *closing;
+
+	if (uri == NULL || !g_str_has_prefix (uri, "mtp://[")) {
+		return FALSE;
+	}
+
+	closing = strchr (uri, ']');
+	if (closing == NULL) {
+		return FALSE;
+	}
+
+	return g_strcmp0 (closing + 1, "/") == 0;
+}
+
+static gboolean
+error_looks_like_locked_mtp (GError *error)
+{
+	char *lower;
+	gboolean looks_locked;
+
+	if (error == NULL || error->message == NULL) {
+		return FALSE;
+	}
+
+	lower = g_ascii_strdown (error->message, -1);
+	looks_locked =
+		(g_strstr_len (lower, -1, "locked") != NULL) ||
+		(g_strstr_len (lower, -1, "unlock") != NULL) ||
+		(g_strstr_len (lower, -1, "permission denied") != NULL) ||
+		(g_strstr_len (lower, -1, "not authorized") != NULL) ||
+		(g_strstr_len (lower, -1, "access denied") != NULL);
+	g_free (lower);
+
+	return looks_locked;
+}
+
+static gboolean
+mtp_unlock_retry_cb (gpointer user_data)
+{
+	NemoWindowSlot *slot;
+	char *uri;
+
+	slot = NEMO_WINDOW_SLOT (user_data);
+
+	if (slot->location == NULL || !gtk_widget_get_visible (slot->mtp_unlock_box)) {
+		slot->mtp_retry_timeout_id = 0;
+		return G_SOURCE_REMOVE;
+	}
+
+	uri = g_file_get_uri (slot->location);
+	if (!uri_is_mtp_root (uri)) {
+		g_free (uri);
+		gtk_widget_hide (slot->mtp_unlock_box);
+		slot->mtp_retry_timeout_id = 0;
+		return G_SOURCE_REMOVE;
+	}
+	g_free (uri);
+
+	nemo_window_slot_queue_reload (slot, FALSE);
+	return G_SOURCE_CONTINUE;
+}
+
+static void
+mtp_unlock_overlay_set_visible (NemoWindowSlot *slot,
+					gboolean visible)
+{
+	if (visible) {
+		gtk_widget_hide (slot->no_search_results_box);
+		gtk_widget_show (slot->mtp_unlock_box);
+		if (slot->mtp_retry_timeout_id == 0) {
+			slot->mtp_retry_timeout_id = g_timeout_add_seconds (2, mtp_unlock_retry_cb, slot);
+		}
+	} else {
+		gtk_widget_hide (slot->mtp_unlock_box);
+		if (slot->mtp_retry_timeout_id != 0) {
+			g_source_remove (slot->mtp_retry_timeout_id);
+			slot->mtp_retry_timeout_id = 0;
+		}
+	}
+}
+
+static void
+view_load_error_cb (NemoView *view,
+			    GError *error,
+			    NemoWindowSlot *slot)
+{
+	char *uri;
+
+	if (slot->location == NULL) {
+		return;
+	}
+
+	uri = g_file_get_uri (slot->location);
+	if (uri_is_mtp_root (uri) && error_looks_like_locked_mtp (error)) {
+		mtp_unlock_overlay_set_visible (slot, TRUE);
+	}
+	g_free (uri);
+}
+
 static void
 nemo_window_slot_init (NemoWindowSlot *slot)
 {
@@ -339,10 +474,15 @@ nemo_window_slot_init (NemoWindowSlot *slot)
     gtk_overlay_add_overlay (GTK_OVERLAY (slot->view_overlay),
                              slot->no_search_results_box);
 
+	slot->mtp_unlock_box = create_mtp_unlock_box ();
+	gtk_overlay_add_overlay (GTK_OVERLAY (slot->view_overlay),
+					 slot->mtp_unlock_box);
+
 	g_signal_connect (slot->floating_bar, "action",
 			  G_CALLBACK (floating_bar_action_cb), slot);
 
     slot->cache_bar = NULL;
+	slot->mtp_retry_timeout_id = 0;
 
 	slot->title = g_strdup (_("Loading..."));
 }
@@ -352,6 +492,9 @@ view_end_loading_cb (NemoView       *view,
 		     		 gboolean        all_files_seen,
 		     		 NemoWindowSlot *slot)
 {
+	gboolean show_mtp_unlock = FALSE;
+	char *uri = NULL;
+
 	if (slot->needs_reload) {
 		nemo_window_slot_queue_reload (slot, FALSE);
 		slot->needs_reload = FALSE;
@@ -369,8 +512,16 @@ view_end_loading_cb (NemoView       *view,
             }
         }
 
+		uri = slot->location ? g_file_get_uri (slot->location) : NULL;
+		if (uri_is_mtp_root (uri) && !nemo_directory_is_not_empty (directory)) {
+			show_mtp_unlock = TRUE;
+		}
+
         nemo_directory_unref (directory);
+		g_free (uri);
     }
+
+	mtp_unlock_overlay_set_visible (slot, show_mtp_unlock);
 }
 
 static void
@@ -407,6 +558,11 @@ nemo_window_slot_dispose (GObject *object)
 	if (slot->loading_timeout_id != 0) {
 		g_source_remove (slot->loading_timeout_id);
 		slot->loading_timeout_id = 0;
+	}
+
+	if (slot->mtp_retry_timeout_id != 0) {
+		g_source_remove (slot->mtp_retry_timeout_id);
+		slot->mtp_retry_timeout_id = 0;
 	}
 
 	nemo_window_slot_set_viewed_file (slot, NULL);
@@ -632,6 +788,7 @@ nemo_window_slot_set_content_view_widget (NemoWindowSlot *slot,
 	if (slot->content_view != NULL) {
 		/* disconnect old view */
         g_signal_handlers_disconnect_by_func (slot->content_view, G_CALLBACK (view_end_loading_cb), slot);
+		g_signal_handlers_disconnect_by_func (slot->content_view, G_CALLBACK (view_load_error_cb), slot);
 
 		nemo_window_disconnect_content_view (window, slot->content_view);
 
@@ -650,6 +807,7 @@ nemo_window_slot_set_content_view_widget (NemoWindowSlot *slot,
 		g_object_ref (slot->content_view);
 
 		g_signal_connect (new_view, "end_loading", G_CALLBACK (view_end_loading_cb), slot);
+		g_signal_connect (new_view, "load_error", G_CALLBACK (view_load_error_cb), slot);
 
 		/* connect new view */
 		nemo_window_connect_content_view (window, new_view);
