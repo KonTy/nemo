@@ -3,11 +3,11 @@
 # Compress selected files/folders to an archive
 Active=true
 
-Name=Compress to 7z Archive
-Comment=Create a compressed .7z archive from selected files
+Name=Compress to Archive
+Comment=Create a compressed .tar.gz archive with progress
 
-# Use 7z to create archive in the parent directory
-Exec=<compress-to-7z.sh %F>
+# Use tar + pv + gzip to create archive in the parent directory
+Exec=<compress-to-archive.sh %F>
 
 Icon-Name=package-x-generic
 
@@ -17,5 +17,5 @@ Selection=notnone
 # Show for all file types
 Extensions=any;
 
-# Only show if 7z is available
-Conditions=exec 7z;
+# Only show if required tools are available
+Conditions=exec tar;exec pv;exec gzip;exec zenity;

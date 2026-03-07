@@ -78,6 +78,36 @@ These features were developed for smplos-nemo and are not expected to be accepte
   - Use-after-free crash fixes
   - Reason for smplos-only: Some upstream, some smplos-specific
 
+- **Archive Browsing** (`feature/archive-support`)
+  - Double-click archives to browse contents like folders
+  - Transparent FUSE-based mounting (fuse-zip, archivemount)
+  - Supports ZIP, 7z, TAR, TAR.GZ, TAR.BZ2, TAR.XZ, RAR
+  - Mount points in `/run/user/$UID/nemo-archives/`
+  - Automatic cleanup when no longer accessed
+  - Reason for smplos-only: Requires external FUSE tools
+
+- **Archive Creation** (`feature/archive-support`)
+  - Right-click context menu "Compress to Archive"
+  - Creates .tar.gz archives with interactive filename dialog
+  - Real progress feedback via `pv` with zenity dialogs
+  - Single or multiple file/folder selection
+  - Reason for smplos-only: Integration with specific compression tools
+
+- **Archive Browsing** (`feature/archive-support`)
+  - Double-click archives to browse contents like folders
+  - Transparent FUSE-based mounting (fuse-zip, archivemount)
+  - Supports ZIP, 7z, TAR, TAR.GZ, TAR.BZ2, TAR.XZ, RAR
+  - Mount points in `/run/user/$UID/nemo-archives/`
+  - Automatic cleanup when no longer accessed
+  - Reason for smplos-only: Requires external FUSE tools
+
+- **Archive Creation** (`feature/archive-support`)
+  - Right-click context menu "Compress to 7z Archive"
+  - Maximum compression with interactive filename dialog
+  - Progress feedback with zenity dialogs
+  - Single or multiple file/folder selection
+  - Reason for smplos-only: Integration with specific compression tools
+
 ### 🚧 In Development
 
 (None currently)
@@ -85,6 +115,16 @@ These features were developed for smplos-nemo and are not expected to be accepte
 ---
 
 ## Version History
+
+### smplos-nemo v1.0.2 (March 2026)
+- Archive browsing: Double-click ZIP/7z/TAR archives to browse contents
+- Archive creation: Right-click to compress files to tar.gz
+- Dependencies: fuse-zip, archivemount, pv, gzip, zenity
+
+### smplos-nemo v1.0.2 (March 2026)
+- Archive browsing: Double-click ZIP/7z/TAR archives to browse contents
+- Archive creation: Right-click to compress files to 7z
+- Dependencies: fuse-zip, archivemount, p7zip, zenity
 
 ### smplos-nemo v1.0.1 (March 2026)
 - MTP support fully functional

@@ -13,6 +13,8 @@ We've implemented numerous features that enhance the file manager experience:
 - **Preview Pane** with GPS mapping, image/video preview, and metadata display
 - **Disk Usage Overview** with interactive Pareto charts and navigation
 - **MTP Device Support** for seamless phone/tablet access
+- **Archive Browsing** to explore ZIP/7z/TAR contents like folders
+- **Archive Creation** with right-click compression to 7z
 - **Substring Search** for smarter file discovery
 - **Configurable Keyboard Shortcuts** for power users
 - **Tab-based Pane Splitting** for advanced multitasking
@@ -115,6 +117,43 @@ Access the **Overview** entry at the top of the sidebar under *My Computer* to s
 - **Process-wide Cache**: Scan results shared across all windows and tabs
 - **Periodic Rescan**: Cache refreshes automatically every 120 seconds in the background
 - **Full Navigation Integration**: Back/forward buttons, sidebar clicks, and address bar entries all work with `overview://`
+
+---
+## Archive Support — Browse and Create Archives
+
+Transparently browse archive contents as folders and create compressed archives with a single click.
+
+### Archive Browsing
+
+Double-click any archive to explore its contents like a regular folder:
+
+- **Supported Formats**: ZIP, 7z, TAR, TAR.GZ, TAR.BZ2, TAR.XZ, RAR
+- **FUSE Mounting**: Uses fuse-zip and archivemount for transparent access
+- **Navigation**: Browse, preview files, and copy/extract contents like normal folders
+- **Automatic Mount Points**: Archives mounted in `/run/user/$UID/nemo-archives/`
+- **Graceful Errors**: User-friendly dialogs when tools are missing
+
+### Archive Creation
+
+Right-click files/folders and select **"Compress to Archive"** to create compressed archives:
+
+- **Interactive Dialog**: Choose custom archive names
+- **Progress Feedback**: Real progress via `pv` (bytes processed)
+- **Progress Feedback**: Visual progress bar during compression
+- **Overwrite Protection**: Prompts before replacing existing archives
+- **Multiple Selection**: Compress multiple files/folders at once
+
+### Dependencies
+
+Install the following tools for full functionality:
+
+```bash
+# Arch Linux
+sudo pacman -S fuse-zip pv gzip zenity
+
+# Ubuntu/Debian
+sudo apt install fuse-zip archivemount pv gzip zenity
+```
 
 ---
 
