@@ -2726,15 +2726,33 @@ volume_mount_cb (GObject *source_object,
 					g_strstr_len (lower, -1, "unauthorized") != NULL ||
 					g_strstr_len (lower, -1, "not authorized") != NULL ||
 					g_strstr_len (lower, -1, "access denied") != NULL));
+				gboolean open_failed = (lower != NULL && (
+					g_strstr_len (lower, -1, "unable to open mtp device") != NULL ||
+					g_strstr_len (lower, -1, "cannot open mtp device") != NULL ||
+					g_strstr_len (lower, -1, "libmtp") != NULL ||
+					g_strstr_len (lower, -1, "busy") != NULL));
+				gboolean gvfs_mtp_available =
+					(g_file_test ("/usr/lib/gvfsd-mtp", G_FILE_TEST_EXISTS) ||
+					 g_file_test ("/usr/lib/gvfs/gvfsd-mtp", G_FILE_TEST_EXISTS) ||
+					 g_file_test ("/usr/libexec/gvfsd-mtp", G_FILE_TEST_EXISTS) ||
+					 g_file_test ("/usr/libexec/gvfs/gvfsd-mtp", G_FILE_TEST_EXISTS));
 				g_free (lower);
 
 				if (needs_unlock) {
 					secondary = g_strdup_printf (
 						_ ("%s\n\nUnlock your phone and select \"File Transfer\" (MTP) on the USB options, then try again."),
 						error->message);
-				} else {
+				} else if (open_failed) {
+					secondary = g_strdup_printf (
+						_ ("%s\n\nNemo detected your phone, but the MTP session could not be opened.\n\nTry: 1) Unlock the phone and keep it unlocked, 2) Select \"File Transfer\" (MTP), 3) Unplug/replug USB, then retry."),
+						error->message);
+				} else if (!gvfs_mtp_available) {
 					secondary = g_strdup_printf (
 						_ ("%s\n\nMTP support requires the GVFS MTP backend. Please install gvfs-mtp (Arch) or gvfs-backends (Debian/Ubuntu) and try again."),
+						error->message);
+				} else {
+					secondary = g_strdup_printf (
+						_ ("%s\n\nMTP mount failed. Ensure the phone is unlocked and in \"File Transfer\" mode, then reconnect USB and retry."),
 						error->message);
 				}
 
