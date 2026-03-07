@@ -74,19 +74,30 @@ cd "$PARENT_DIR"
 # Run tar + pv + gzip with real progress
 LOG_FILE="/tmp/archive_output_$$.log"
 ERROR_DISPLAY="/tmp/archive_error_$$.txt"
+PROGRESS_FIFO="/tmp/archive_progress_$$.fifo"
 
-(
-    tar -cf - "${ITEMS[@]}" 2>"$LOG_FILE" | \
-    pv -n -s "$TOTAL_BYTES" | \
-    gzip -c > "$ARCHIVE_PATH"
-) 2>>"$LOG_FILE" | \
-zenity --progress \
+rm -f "$PROGRESS_FIFO"
+mkfifo "$PROGRESS_FIFO"
+
+ZENITY_PROGRESS_CMD=(zenity --progress \
     --title="Creating Archive" \
     --text="Compressing files to $ARCHIVE_NAME..." \
     --percentage=0 \
-    --auto-close 2>/dev/null
+    --width=520 --height=120 \
+    --no-cancel --auto-close --auto-kill)
+
+"${ZENITY_PROGRESS_CMD[@]}" < "$PROGRESS_FIFO" 2>/dev/null &
+ZENITY_PID=$!
+
+tar -cf - "${ITEMS[@]}" 2>>"$LOG_FILE" | \
+    pv -n -s "$TOTAL_BYTES" 2> "$PROGRESS_FIFO" | \
+    gzip -c > "$ARCHIVE_PATH"
 
 EXIT_CODE=$?
+
+# Close progress dialog
+wait $ZENITY_PID 2>/dev/null
+rm -f "$PROGRESS_FIFO"
 
 if [ $EXIT_CODE -eq 0 ] && [ -f "$ARCHIVE_PATH" ]; then
     ARCHIVE_SIZE=$(du -h "$ARCHIVE_PATH" | cut -f1)

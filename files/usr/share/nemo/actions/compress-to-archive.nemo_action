@@ -18,4 +18,4 @@ Selection=notnone
 Extensions=any;
 
 # Only show if required tools are available
-Conditions=exec tar;exec pv;exec gzip;exec zenity;
+Dependencies=tar;pv;gzip;zenity;
