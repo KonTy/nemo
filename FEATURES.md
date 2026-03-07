@@ -86,11 +86,15 @@ These features were developed for smplos-nemo and are not expected to be accepte
 
 ## Version History
 
-### smplos-nemo v1.0.0 (March 2026)
-- Initial smplos fork with all above features integrated
+### smplos-nemo v1.0.1 (March 2026)
 - MTP support fully functional
 - Overview page with side-by-side layout
 - Preview pane with GPS mapping
+- CI updated to build on `release` and publish downloadable artifacts
+- About dialog branding updated to `smplos-nemo`
+
+### smplos-nemo v1.0.0 (March 2026)
+- Initial smplos fork with all above features integrated
 
 ---
 
