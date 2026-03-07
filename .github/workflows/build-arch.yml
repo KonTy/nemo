@@ -1,0 +1,57 @@
+name: Build Arch Artifact
+
+on:
+  push:
+    branches:
+      - release
+  pull_request:
+    branches:
+      - release
+  workflow_dispatch:
+
+jobs:
+  arch-build:
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux:latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          pacman -Syu --noconfirm --needed \
+            base-devel git meson ninja pkgconf \
+            gtk3 glib2 json-glib libx11 xapp cinnamon-desktop \
+            libexif exempi gstreamer gst-plugins-base-libs \
+            pango gobject-introspection libgsf python zstd
+
+      - name: Configure
+        run: |
+          meson setup build \
+            --prefix=/usr \
+            --buildtype=release \
+            -Dtracker=false
+
+      - name: Build
+        run: ninja -C build
+
+      - name: Stage install tree
+        run: |
+          rm -rf stage
+          DESTDIR="$PWD/stage" ninja -C build install
+
+      - name: Create Arch test artifact
+        run: |
+          VERSION=$(grep -Po "version\s*:\s*'\K[^']+" meson.build | head -n1)
+          ARTIFACT="smplos-nemo-${VERSION}-arch-x86_64-rootfs.tar.zst"
+          tar -C stage -I 'zstd -19 -T0' -cf "$ARTIFACT" .
+          echo "Created $ARTIFACT"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: smplos-nemo-arch-rootfs
+          path: smplos-nemo-*-arch-x86_64-rootfs.tar.zst
+          retention-days: 14
