@@ -148,6 +148,7 @@ typedef struct {
     guint expand_timeout_source;
     guint popup_menu_action_index;
     guint update_places_on_idle_id;
+    guint mtp_hint_refresh_id;
 
 } NemoPlacesSidebar;
 
@@ -225,6 +226,7 @@ static void  check_unmount_and_eject                   (GMount *mount,
 
 static void update_places                              (NemoPlacesSidebar *sidebar);
 static void update_places_on_idle                      (NemoPlacesSidebar *sidebar);
+static gboolean mtp_hint_refresh_cb                    (gpointer data);
 static void rebuild_menu                               (NemoPlacesSidebar *sidebar);
 static void actions_changed                            (gpointer user_data);
 /* Identifiers for target types */
@@ -722,6 +724,134 @@ get_icon_name (const gchar *uri)
     return icon_name;
 }
 
+/* Scan /run/media for portable devices (phones, USB drives) that might not be 
+ * exposed by GVolumeMonitor. This helps detect devices that GVFS hasn't enumerated yet. */
+static GList *
+get_portable_devices_from_media_dir (void)
+{
+    GList *portable_mounts = NULL;
+    const gchar *media_dir = "/run/media";
+    const gchar *user = g_get_user_name ();
+    gchar *user_media_dir = NULL;
+    GDir *dir = NULL;
+    GError *error = NULL;
+
+    if (!user) {
+        return NULL;
+    }
+
+    user_media_dir = g_build_filename (media_dir, user, NULL);
+    
+    dir = g_dir_open (user_media_dir, 0, &error);
+    if (!dir) {
+        if (error && error->code != G_FILE_ERROR_NOENT) {
+            DEBUG ("Could not open %s: %s", user_media_dir, error->message);
+        }
+        g_clear_error (&error);
+        g_free (user_media_dir);
+        return NULL;
+    }
+
+    const gchar *entry = NULL;
+    while ((entry = g_dir_read_name (dir)) != NULL) {
+        gchar *full_path = g_build_filename (user_media_dir, entry, NULL);
+        
+        /* Check if it's a directory and is actually mounted */
+        if (g_file_test (full_path, G_FILE_TEST_IS_DIR)) {
+            GFile *device_file = g_file_new_for_path (full_path);
+            GMount *existing_mount = g_file_find_enclosing_mount (device_file, NULL, NULL);
+            
+            if (existing_mount != NULL) {
+                /* This is an actual mounted filesystem */
+                portable_mounts = g_list_prepend (portable_mounts, existing_mount);
+            }
+            
+            g_object_unref (device_file);
+        }
+        
+        g_free (full_path);
+    }
+
+    g_dir_close (dir);
+    g_free (user_media_dir);
+
+    return portable_mounts;
+}
+
+/* Detect if an MTP-capable USB interface is present via sysfs.
+ * MTP devices typically expose a PTP/MTP interface class 06, subclass 01. */
+static gboolean
+mtp_device_connected (void)
+{
+    GDir *dir = NULL;
+    const gchar *entry = NULL;
+    gboolean found = FALSE;
+
+    dir = g_dir_open ("/sys/bus/usb/devices", 0, NULL);
+    if (dir == NULL) {
+        return FALSE;
+    }
+
+    while ((entry = g_dir_read_name (dir)) != NULL) {
+        gchar *iface_class_path = g_build_filename ("/sys/bus/usb/devices", entry, "bInterfaceClass", NULL);
+        gchar *iface_subclass_path = g_build_filename ("/sys/bus/usb/devices", entry, "bInterfaceSubClass", NULL);
+        gchar *iface_protocol_path = g_build_filename ("/sys/bus/usb/devices", entry, "bInterfaceProtocol", NULL);
+        gchar *class_val = NULL;
+        gchar *subclass_val = NULL;
+        gchar *protocol_val = NULL;
+
+        if (g_file_get_contents (iface_class_path, &class_val, NULL, NULL) &&
+            g_file_get_contents (iface_subclass_path, &subclass_val, NULL, NULL) &&
+            g_file_get_contents (iface_protocol_path, &protocol_val, NULL, NULL)) {
+            g_strstrip (class_val);
+            g_strstrip (subclass_val);
+            g_strstrip (protocol_val);
+
+            if (g_strcmp0 (class_val, "06") == 0 &&
+                g_strcmp0 (subclass_val, "01") == 0) {
+                found = TRUE;
+            }
+        }
+
+        g_free (class_val);
+        g_free (subclass_val);
+        g_free (protocol_val);
+        g_free (iface_class_path);
+        g_free (iface_subclass_path);
+        g_free (iface_protocol_path);
+
+        if (found) {
+            break;
+        }
+    }
+
+    g_dir_close (dir);
+    return found;
+}
+
+static gboolean
+mtp_hint_refresh_cb (gpointer data)
+{
+    NemoPlacesSidebar *sidebar = NEMO_PLACES_SIDEBAR (data);
+    gboolean gvfs_mtp_available;
+    gboolean mtp_connected;
+
+    gvfs_mtp_available = (g_file_test ("/usr/lib/gvfsd-mtp", G_FILE_TEST_EXISTS) ||
+                          g_file_test ("/usr/lib/gvfs/gvfsd-mtp", G_FILE_TEST_EXISTS) ||
+                          g_file_test ("/usr/libexec/gvfsd-mtp", G_FILE_TEST_EXISTS) ||
+                          g_file_test ("/usr/libexec/gvfs/gvfsd-mtp", G_FILE_TEST_EXISTS));
+    mtp_connected = mtp_device_connected ();
+
+    if (!gvfs_mtp_available && mtp_connected) {
+        update_places_on_idle (sidebar);
+        return G_SOURCE_CONTINUE;
+    }
+
+    sidebar->mtp_hint_refresh_id = 0;
+    update_places_on_idle (sidebar);
+    return G_SOURCE_REMOVE;
+}
+
 static void
 update_places (NemoPlacesSidebar *sidebar)
 {
@@ -746,6 +876,9 @@ update_places (NemoPlacesSidebar *sidebar)
     gchar *tooltip_info;
 	GList *network_mounts, *network_volumes;
     gint full;
+    gboolean gvfs_mtp_available;
+    gboolean has_mtp_volume;
+    gboolean mtp_connected;
 
 	DEBUG ("Updating places sidebar");
 
@@ -773,6 +906,22 @@ update_places (NemoPlacesSidebar *sidebar)
 
 	network_mounts = network_volumes = NULL;
 	volume_monitor = sidebar->volume_monitor;
+
+gvfs_mtp_available = (g_file_test ("/usr/lib/gvfsd-mtp", G_FILE_TEST_EXISTS) ||
+	                      g_file_test ("/usr/lib/gvfs/gvfsd-mtp", G_FILE_TEST_EXISTS) ||
+	                      g_file_test ("/usr/libexec/gvfsd-mtp", G_FILE_TEST_EXISTS) ||
+                          g_file_test ("/usr/libexec/gvfs/gvfsd-mtp", G_FILE_TEST_EXISTS));
+    has_mtp_volume = FALSE;
+    mtp_connected = mtp_device_connected ();
+
+    if (!gvfs_mtp_available && mtp_connected) {
+        if (sidebar->mtp_hint_refresh_id == 0) {
+            sidebar->mtp_hint_refresh_id = g_timeout_add_seconds (5, mtp_hint_refresh_cb, sidebar);
+        }
+    } else if (sidebar->mtp_hint_refresh_id != 0) {
+        g_source_remove (sidebar->mtp_hint_refresh_id);
+        sidebar->mtp_hint_refresh_id = 0;
+    }
 
     cat_iter = add_heading (sidebar, SECTION_COMPUTER,
                                     _("My Computer"));
@@ -1028,6 +1177,62 @@ update_places (NemoPlacesSidebar *sidebar)
     }
     g_list_free (mounts);
 
+    /* Also check for portable devices (phones, USB drives) from /run/media
+     * that might not be properly exposed by GVolumeMonitor. This helps
+     * detect devices that GVFS MTP backend hasn't enumerated yet. */
+    GList *portable_mounts = get_portable_devices_from_media_dir ();
+    for (l = portable_mounts; l != NULL; l = l->next) {
+        mount = l->data;
+        if (g_mount_is_shadowed (mount)) {
+            g_object_unref (mount);
+            continue;
+        }
+        
+        volume = g_mount_get_volume (mount);
+        if (volume != NULL) {
+            /* This mount is already handled by GVolumeMonitor */
+            g_object_unref (volume);
+            g_object_unref (mount);
+            continue;
+        }
+        
+        root = g_mount_get_default_location (mount);
+        if (!g_file_is_native (root)) {
+            /* Skip non-local filesystems */
+            g_object_unref (root);
+            g_object_unref (mount);
+            continue;
+        }
+
+        gchar *full_display_name = NULL;
+        icon = nemo_get_mount_icon_name (mount);
+        mount_uri = g_file_get_uri (root);
+        name = g_mount_get_name (mount);
+
+        full_display_name = g_file_get_parse_name (root);
+        df_file = g_file_new_for_uri (mount_uri);
+        full = get_disk_full (df_file, &tooltip_info);
+        g_clear_object (&df_file);
+
+        tooltip = g_strdup_printf (_("%s\n%s"), full_display_name, tooltip_info);
+        g_free (tooltip_info);
+
+        place_info = new_place_info (PLACES_MOUNTED_VOLUME,
+                                     SECTION_DEVICES,
+                                     name, icon, mount_uri,
+                                     NULL, NULL, mount, 0, tooltip, full, full > -1);
+        place_infos = g_list_prepend (place_infos, place_info);
+
+        g_object_unref (root);
+        g_object_unref (mount);
+        g_free (icon);
+        g_free (name);
+        g_free (tooltip);
+        g_free (mount_uri);
+        g_free (full_display_name);
+    }
+    g_list_free (portable_mounts);
+
     /* first go through all connected drives */
     drives = g_volume_monitor_get_connected_drives (volume_monitor);
 
@@ -1119,29 +1324,83 @@ update_places (NemoPlacesSidebar *sidebar)
             }
             g_list_free (volumes);
         } else {
-            if (g_drive_is_removable (drive) && !g_drive_is_media_check_automatic (drive)) {
-                /* If the drive has no mountable volumes and we cannot detect media change.. we
-                 * display the drive in the sidebar so the user can manually poll the drive by
-                 * right clicking and selecting "Rescan..."
-                 *
-                 * This is mainly for drives like floppies where media detection doesn't
-                 * work.. but it's also for human beings who like to turn off media detection
-                 * in the OS to save battery juice.
-                 */
+            /* Drive has no volumes reported via g_drive_get_volumes().
+             * This can happen with MTP devices. Check if there's an existing mount
+             * by looking at all volumes (not just ones from this drive). */
+            GList *all_volumes = g_volume_monitor_get_volumes (volume_monitor);
+            GMount *matching_mount = NULL;
+            gchar *drive_name = g_drive_get_name (drive);
+            
+            for (GList *v = all_volumes; v != NULL; v = v->next) {
+                GVolume *vol = v->data;
+                gchar *vol_name = g_volume_get_name (vol);
+                
+                /* Check if volume name matches drive name (e.g., "SAMSUNG Android") */
+                if (vol_name && drive_name && g_strcmp0 (vol_name, drive_name) == 0) {
+                    /* Found matching volume - check if it has a mount */
+                    matching_mount = g_volume_get_mount (vol);
+                    g_free (vol_name);
+                    break;
+                }
+                g_free (vol_name);
+            }
+            g_list_free_full (all_volumes, g_object_unref);
+            
+            if (matching_mount != NULL) {
+                /* Found an existing mount for this drive - show it as mounted */
+                GFile *root = g_mount_get_default_location (matching_mount);
+                icon = nemo_get_mount_icon_name (matching_mount);
+                mount_uri = g_file_get_uri (root);
+                name = g_mount_get_name (matching_mount);
+                tooltip = g_strdup_printf (_("Browse %s"), name);
+                
+                place_info = new_place_info (PLACES_MOUNTED_VOLUME,
+                                             SECTION_DEVICES,
+                                             name, icon, mount_uri,
+                                             drive, NULL, matching_mount, 0, tooltip, 0, FALSE);
+                place_infos = g_list_prepend (place_infos, place_info);
+                
+                g_object_unref (root);
+                g_object_unref (matching_mount);
+                g_free (icon);
+                g_free (tooltip);
+                g_free (name);
+                g_free (mount_uri);
+            } else {
+                /* No existing mount - show as unmounted drive */
                 icon = nemo_get_drive_icon_name (drive);
-                name = g_drive_get_name (drive);
-                tooltip = g_strdup_printf (_("Mount and open %s"), name);
+                name = drive_name;
+                
+                /* Check if this looks like a phone/MTP device */
+                gboolean is_phone = (g_strstr_len (name, -1, "Phone") != NULL ||
+                                     g_strstr_len (name, -1, "Android") != NULL ||
+                                     (g_strstr_len (name, -1, "Samsung") != NULL && g_drive_is_removable (drive)));
+                
+                /* Skip internal drives (non-removable drives that don't look like phones) */
+                if (!is_phone && !g_drive_is_removable (drive)) {
+                    g_free (icon);
+                    g_free (drive_name);
+                    g_object_unref (drive);
+                    continue;
+                }
+                
+                if (is_phone) {
+                    tooltip = g_strdup_printf (_("Click to mount %s\n\nIf nothing happens, install gvfs-mtp:\n  sudo pacman -S gvfs-mtp  (Arch)\n  sudo apt install gvfs-backends  (Ubuntu/Debian)"), name);
+                } else {
+                    tooltip = g_strdup_printf (_("Mount and open %s"), name);
+                }
 
                 place_info = new_place_info (PLACES_BUILT_IN,
-                                             SECTION_DEVICES,
-                                             name, icon, NULL,
-                                             drive, NULL, NULL, 0, tooltip, 0, FALSE);
+                                                 SECTION_DEVICES,
+                                                 name, icon, NULL,
+                                                 drive, NULL, NULL, 0, tooltip, 0, FALSE);
                 place_infos = g_list_prepend (place_infos, place_info);
 
                 g_free (icon);
                 g_free (tooltip);
-                g_free (name);
             }
+            
+            g_free (drive_name);
         }
         g_object_unref (drive);
     }
@@ -1149,6 +1408,7 @@ update_places (NemoPlacesSidebar *sidebar)
 
     /* add all volumes that is not associated with a drive */
     volumes = g_volume_monitor_get_volumes (volume_monitor);
+
     for (l = volumes; l != NULL; l = l->next) {
         volume = l->data;
         drive = g_volume_get_drive (volume);
@@ -1156,6 +1416,22 @@ update_places (NemoPlacesSidebar *sidebar)
                 g_object_unref (volume);
             g_object_unref (drive);
             continue;
+        }
+
+        /* Track MTP volumes so we don't show the missing-backend hint */
+        {
+            gchar *vol_name = g_volume_get_name (volume);
+            gchar *class_id = g_volume_get_identifier (volume, G_VOLUME_IDENTIFIER_KIND_CLASS);
+            if ((class_id != NULL && g_strstr_len (class_id, -1, "mtp") != NULL) ||
+                (vol_name != NULL && (
+                g_strstr_len (vol_name, -1, "Android") != NULL ||
+                g_strstr_len (vol_name, -1, "Phone") != NULL ||
+                g_strstr_len (vol_name, -1, "Samsung") != NULL ||
+                g_strstr_len (vol_name, -1, "MTP") != NULL))) {
+                has_mtp_volume = TRUE;
+            }
+            g_free (vol_name);
+            g_free (class_id);
         }
 
         identifier = g_volume_get_identifier (volume, G_VOLUME_IDENTIFIER_KIND_CLASS);
@@ -1219,6 +1495,23 @@ update_places (NemoPlacesSidebar *sidebar)
         g_object_unref (volume);
     }
     g_list_free (volumes);
+
+    /* If MTP backend is missing and an MTP device is connected, show a hint entry */
+    if (!gvfs_mtp_available && mtp_connected && !has_mtp_volume) {
+        icon = g_strdup ("smartphone");
+        name = g_strdup (_("MTP devices unavailable"));
+        tooltip = g_strdup (_("Install gvfs-mtp to access phones over USB (MTP)"));
+
+        place_info = new_place_info (PLACES_BUILT_IN,
+                                     SECTION_DEVICES,
+                                     name, icon, (char *)"mtp-hint://",
+                                     NULL, NULL, NULL, 0, tooltip, 0, FALSE);
+        place_infos = g_list_prepend (place_infos, place_info);
+
+        g_free (icon);
+        g_free (name);
+        g_free (tooltip);
+    }
 
     place_infos = g_list_sort (place_infos, (GCompareFunc) sort_places_func);
 
@@ -2520,6 +2813,13 @@ open_selected_bookmark (NemoPlacesSidebar *sidebar,
 	gtk_tree_model_get (model, iter, PLACES_SIDEBAR_COLUMN_URI, &uri, -1);
 
 	if (uri != NULL) {
+        if (g_str_has_prefix (uri, "mtp-hint://")) {
+            eel_show_error_dialog (_("MTP support not installed"),
+                           _("Install gvfs-mtp to access phones over USB (MTP).\n\nIf your phone is connected, unlock it and choose \"File Transfer\" (MTP), then try again."),
+                           NULL);
+            g_free (uri);
+            return;
+        }
 		DEBUG ("Activating bookmark %s", uri);
 
 		location = g_file_new_for_uri (uri);
@@ -4484,6 +4784,11 @@ nemo_places_sidebar_dispose (GObject *object)
     if (sidebar->update_places_on_idle_id != 0) {
         g_source_remove (sidebar->update_places_on_idle_id);
         sidebar->update_places_on_idle_id = 0;
+    }
+
+    if (sidebar->mtp_hint_refresh_id != 0) {
+        g_source_remove (sidebar->mtp_hint_refresh_id);
+        sidebar->mtp_hint_refresh_id = 0;
     }
 
 	g_clear_object (&sidebar->store);

@@ -133,6 +133,7 @@ struct _NemoOverview {
 	GtkWidget    *pareto_box;
 	GArray       *volumes;
 	GCancellable *scan_cancel;
+	char         *current_anchor;  /* bookmarked volume mount_path */
 };
 
 G_DEFINE_TYPE (NemoOverview, nemo_overview, GTK_TYPE_SCROLLED_WINDOW)
@@ -181,6 +182,37 @@ scan_result_free (ScanResult *sr)
 	if (sr->deep)
 		g_array_unref (sr->deep);
 	g_free (sr);
+}
+
+/* Scroll to anchor (volume_card with matching mount-path) */
+static gboolean
+scroll_to_anchor (NemoOverview *self)
+{
+	GtkAdjustment *adj;
+	GList *children, *c;
+	
+	if (self->current_anchor == NULL)
+		return FALSE;
+	
+	children = gtk_container_get_children (GTK_CONTAINER (self->pareto_box));
+	for (c = children; c != NULL; c = c->next) {
+		GtkWidget *card = GTK_WIDGET (c->data);
+		const char *mp = g_object_get_data (G_OBJECT (card), "pareto-mount-path");
+		
+		if (mp != NULL && g_strcmp0 (mp, self->current_anchor) == 0) {
+			/* Found matching card - scroll to it */
+			GtkAllocation alloc;
+			gtk_widget_get_allocation (card, &alloc);
+			
+			adj = gtk_scrolled_window_get_vadjustment (GTK_SCROLLED_WINDOW (self));
+			gtk_adjustment_set_value (adj, (gdouble) alloc.y);
+			
+			g_list_free (children);
+			return TRUE;
+		}
+	}
+	g_list_free (children);
+	return FALSE;
 }
 
 static void
@@ -860,6 +892,27 @@ pareto_query_tooltip_cb (GtkWidget  *widget,
 }
 
 static gboolean
+heading_button_press_cb (GtkWidget *widget,
+                        GdkEventButton *event,
+                        gpointer user_data)
+{
+	NemoOverview *self = NEMO_OVERVIEW (user_data);
+	GtkWidget *volume_card = gtk_widget_get_parent (widget);
+	
+	if (volume_card == NULL)
+		return FALSE;
+	
+	const char *mp = g_object_get_data (G_OBJECT (volume_card), "pareto-mount-path");
+	if (mp != NULL) {
+		g_free (self->current_anchor);
+		self->current_anchor = g_strdup (mp);
+		scroll_to_anchor (self);
+	}
+	
+	return FALSE;
+}
+
+static gboolean
 list_path_button_press_cb (GtkWidget *widget,
                            GdkEventButton *event,
                            gpointer user_data)
@@ -1030,10 +1083,26 @@ pareto_idle_cb (gpointer data)
 	gtk_widget_set_margin_start (heading, 8);
 	gtk_widget_set_margin_top (heading, 16);
 	gtk_widget_set_margin_bottom (heading, 2);
-	gtk_box_pack_start (GTK_BOX (volume_box), heading, FALSE, FALSE, 0);
-	gtk_widget_show (heading);
+	
+	/* Make heading clickable to bookmark this volume */
+	{
+		GtkWidget *heading_event = gtk_event_box_new ();
+		gtk_event_box_set_visible_window (GTK_EVENT_BOX (heading_event), FALSE);
+		gtk_widget_add_events (heading_event, GDK_BUTTON_PRESS_MASK);
+		gtk_container_add (GTK_CONTAINER (heading_event), heading);
+		g_signal_connect (heading_event, "button-press-event",
+		                  G_CALLBACK (heading_button_press_cb), self);
+		gtk_box_pack_start (GTK_BOX (volume_box), heading_event, FALSE, FALSE, 0);
+		gtk_widget_show (heading);
+		gtk_widget_show (heading_event);
+	}
 
 	/* One deep chart per drive */
+	GtkWidget *hbox = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 16);
+	gtk_widget_set_margin_start (hbox, 8);
+	gtk_widget_set_margin_end (hbox, 8);
+	gtk_widget_set_margin_bottom (hbox, 16);
+	
 	{
 		GtkWidget *sub = gtk_label_new (_("Top offenders (full depth)"));
 		gtk_widget_set_opacity (sub, 0.6);
@@ -1044,8 +1113,11 @@ pareto_idle_cb (gpointer data)
 		gtk_widget_show (sub);
 
 		chart = create_pareto_chart (sr->deep, sr->colour_idx);
-		gtk_box_pack_start (GTK_BOX (volume_box), chart, FALSE, FALSE, 0);
+		gtk_box_pack_start (GTK_BOX (hbox), chart, FALSE, FALSE, 0);
 		gtk_widget_show (chart);
+
+		gtk_box_pack_start (GTK_BOX (volume_box), hbox, FALSE, FALSE, 0);
+		gtk_widget_show (hbox);
 	}
 
 	/* Ranked list, du-like, with clickable full relative paths */
@@ -1102,7 +1174,8 @@ pareto_idle_cb (gpointer data)
 			g_free (sz);
 		}
 
-		gtk_box_pack_start (GTK_BOX (volume_box), list_grid, FALSE, FALSE, 0);
+		/* Pack list into the hbox alongside the chart */
+		gtk_box_pack_start (GTK_BOX (hbox), list_grid, TRUE, TRUE, 0);
 		gtk_widget_show (list_grid);
 	}
 
@@ -1489,6 +1562,7 @@ nemo_overview_finalize (GObject *obj)
 {
 	NemoOverview *self = NEMO_OVERVIEW (obj);
 	g_array_unref (self->volumes);
+	g_free (self->current_anchor);
 	G_OBJECT_CLASS (nemo_overview_parent_class)->finalize (obj);
 }
 

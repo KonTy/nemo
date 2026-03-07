@@ -2691,6 +2691,8 @@ volume_mount_cb (GObject *source_object,
 	char *primary;
 	char *name;
 	gboolean success;
+	gboolean is_mtp;
+	char *id_class;
 
 	success = TRUE;
 	error = NULL;
@@ -2701,9 +2703,48 @@ volume_mount_cb (GObject *source_object,
 			primary = g_strdup_printf (_("Unable to mount %s"), name);
 			g_free (name);
 			success = FALSE;
-			eel_show_error_dialog (primary,
-					       error->message,
-					       NULL);
+
+			id_class = g_volume_get_identifier (G_VOLUME (source_object),
+						  G_VOLUME_IDENTIFIER_KIND_CLASS);
+			is_mtp = (id_class != NULL && g_strstr_len (id_class, -1, "mtp") != NULL);
+			if (!is_mtp) {
+				char *vol_name = g_volume_get_name (G_VOLUME (source_object));
+				is_mtp = (vol_name != NULL && (
+					g_strstr_len (vol_name, -1, "Android") != NULL ||
+					g_strstr_len (vol_name, -1, "Phone") != NULL ||
+					g_strstr_len (vol_name, -1, "Samsung") != NULL ||
+					g_strstr_len (vol_name, -1, "MTP") != NULL));
+				g_free (vol_name);
+			}
+			g_free (id_class);
+
+			if (is_mtp) {
+				char *secondary = NULL;
+				char *lower = g_ascii_strdown (error->message, -1);
+				gboolean needs_unlock = (lower != NULL && (
+					g_strstr_len (lower, -1, "locked") != NULL ||
+					g_strstr_len (lower, -1, "unauthorized") != NULL ||
+					g_strstr_len (lower, -1, "not authorized") != NULL ||
+					g_strstr_len (lower, -1, "access denied") != NULL));
+				g_free (lower);
+
+				if (needs_unlock) {
+					secondary = g_strdup_printf (
+						_ ("%s\n\nUnlock your phone and select \"File Transfer\" (MTP) on the USB options, then try again."),
+						error->message);
+				} else {
+					secondary = g_strdup_printf (
+						_ ("%s\n\nMTP support requires the GVFS MTP backend. Please install gvfs-mtp (Arch) or gvfs-backends (Debian/Ubuntu) and try again."),
+						error->message);
+				}
+
+				eel_show_error_dialog (primary, secondary, NULL);
+				g_free (secondary);
+			} else {
+				eel_show_error_dialog (primary,
+						       error->message,
+						       NULL);
+			}
 			g_free (primary);
 		}
 		g_error_free (error);

@@ -59,6 +59,7 @@
 #include <glib/gi18n.h>
 #include <glib/gstdio.h>
 #include <gio/gio.h>
+#include <gio/gunixmounts.h>
 #include <glib.h>
 #include <libnemo-extension/nemo-file-info.h>
 #include <libnemo-extension/nemo-extension-private.h>
@@ -177,6 +178,7 @@ static const char * nemo_file_peek_display_name_collation_key (NemoFile *file);
 static void file_mount_unmounted (GMount *mount,  gpointer data);
 static void metadata_hash_free (GHashTable *hash);
 static void invalidate_thumbnail (NemoFile *file);
+static void maybe_query_computer_filesystem_info (NemoFile *file);
 
 G_DEFINE_TYPE_WITH_CODE (NemoFile, nemo_file, G_TYPE_OBJECT,
 			 G_IMPLEMENT_INTERFACE (NEMO_TYPE_FILE_INFO,
@@ -2565,6 +2567,9 @@ update_info_internal (NemoFile *file,
 		changed = TRUE;
 	}
 	file->details->size = size;
+	if (size == -1) {
+		maybe_query_computer_filesystem_info (file);
+	}
 
     sort_order = g_file_info_get_attribute_int32 (info, G_FILE_ATTRIBUTE_STANDARD_SORT_ORDER);
 
@@ -7487,26 +7492,226 @@ get_fs_free_cb (GObject *source_object,
 {
 	NemoFile *file;
 	guint64 free_space;
+	guint64 fs_size;
 	GFileInfo *info;
+	GFile *location;
+	gboolean set_fs_size;
+	gboolean changed;
 
 	file = NEMO_FILE (user_data);
 
 	free_space = (guint64)-1;
+	fs_size = (guint64)-1;
 	info = g_file_query_filesystem_info_finish (G_FILE (source_object),
 						    res, NULL);
 	if (info) {
 		if (g_file_info_has_attribute (info, G_FILE_ATTRIBUTE_FILESYSTEM_FREE)) {
 			free_space = g_file_info_get_attribute_uint64 (info, G_FILE_ATTRIBUTE_FILESYSTEM_FREE);
 		}
+		if (g_file_info_has_attribute (info, G_FILE_ATTRIBUTE_FILESYSTEM_SIZE)) {
+			fs_size = g_file_info_get_attribute_uint64 (info, G_FILE_ATTRIBUTE_FILESYSTEM_SIZE);
+		}
 		g_object_unref (info);
 	}
 
+	changed = FALSE;
 	if (file->details->free_space != free_space) {
 		file->details->free_space = free_space;
+		changed = TRUE;
+	}
+
+	set_fs_size = FALSE;
+	if (file->details->type == G_FILE_TYPE_MOUNTABLE) {
+		set_fs_size = TRUE;
+	} else {
+		location = nemo_file_get_location (file);
+		if (location != NULL) {
+			set_fs_size = g_file_has_uri_scheme (location, "computer");
+			g_object_unref (location);
+		}
+	}
+
+	if (set_fs_size && fs_size != (guint64)-1 && file->details->size != (goffset) fs_size) {
+		file->details->size = (goffset) fs_size;
+		changed = TRUE;
+	}
+
+	if (changed) {
 		nemo_file_emit_changed (file);
 	}
 
 	nemo_file_unref (file);
+}
+
+static GFile *
+get_filesystem_query_location_for_computer (NemoFile *file)
+{
+	GFile *location;
+	GFileInfo *info;
+	const char *target_uri;
+	const char *device_path;
+	GFile *target_location;
+	GVolumeMonitor *monitor;
+	GList *mounts;
+	GList *l;
+	GFile *root;
+	char *device_base;
+	GList *unix_mounts;
+	GList *um;
+	GFile *unix_root;
+
+	location = nemo_file_get_location (file);
+	if (location == NULL || !g_file_has_uri_scheme (location, "computer")) {
+		return location;
+	}
+
+	if (file->details->mount != NULL) {
+		root = g_mount_get_root (file->details->mount);
+		if (root != NULL) {
+			g_object_unref (location);
+			return root;
+		}
+	}
+
+	info = g_file_query_info (location,
+	                          G_FILE_ATTRIBUTE_STANDARD_TARGET_URI ","
+	                          G_FILE_ATTRIBUTE_MOUNTABLE_UNIX_DEVICE_FILE,
+	                          G_FILE_QUERY_INFO_NONE,
+	                          NULL, NULL);
+	if (info != NULL) {
+		target_uri = g_file_info_get_attribute_string (info, G_FILE_ATTRIBUTE_STANDARD_TARGET_URI);
+		if (target_uri != NULL) {
+			target_location = g_file_new_for_uri (target_uri);
+			g_object_unref (info);
+			g_object_unref (location);
+			return target_location;
+		}
+	}
+
+	device_path = NULL;
+	if (info != NULL && g_file_info_has_attribute (info, G_FILE_ATTRIBUTE_MOUNTABLE_UNIX_DEVICE_FILE)) {
+		device_path = g_file_info_get_attribute_string (info, G_FILE_ATTRIBUTE_MOUNTABLE_UNIX_DEVICE_FILE);
+	}
+
+	if (device_path == NULL) {
+		if (info != NULL) {
+			g_object_unref (info);
+		}
+		return location;
+	}
+
+	unix_root = NULL;
+	unix_mounts = g_unix_mounts_get (NULL);
+	for (um = unix_mounts; um != NULL; um = um->next) {
+		GUnixMountEntry *entry = um->data;
+		const char *mount_device = g_unix_mount_get_device_path (entry);
+		const char *mount_path = g_unix_mount_get_mount_path (entry);
+
+		if (mount_device == NULL || mount_path == NULL) {
+			continue;
+		}
+
+		if (g_str_has_prefix (mount_device, device_path)) {
+			unix_root = g_file_new_for_path (mount_path);
+			break;
+		}
+	}
+
+	g_list_free_full (unix_mounts, (GDestroyNotify) g_unix_mount_free);
+
+	if (unix_root != NULL) {
+		if (info != NULL) {
+			g_object_unref (info);
+		}
+		g_object_unref (location);
+		return unix_root;
+	}
+
+	device_base = g_path_get_basename (device_path);
+	monitor = g_volume_monitor_get ();
+	mounts = g_volume_monitor_get_mounts (monitor);
+	root = NULL;
+
+	for (l = mounts; l != NULL; l = l->next) {
+		GMount *mount = l->data;
+		GVolume *volume = g_mount_get_volume (mount);
+		char *volume_device = NULL;
+		char *volume_base = NULL;
+
+		if (volume != NULL) {
+			volume_device = g_volume_get_identifier (volume, G_VOLUME_IDENTIFIER_KIND_UNIX_DEVICE);
+			g_object_unref (volume);
+		}
+
+		if (volume_device != NULL) {
+			volume_base = g_path_get_basename (volume_device);
+			if (g_str_has_prefix (volume_base, device_base)) {
+				root = g_mount_get_root (mount);
+				g_free (volume_base);
+				g_free (volume_device);
+				break;
+			}
+			g_free (volume_base);
+			g_free (volume_device);
+		}
+	}
+
+	g_list_free_full (mounts, g_object_unref);
+	g_object_unref (monitor);
+	g_free (device_base);
+	if (info != NULL) {
+		g_object_unref (info);
+	}
+
+	if (root != NULL) {
+		g_object_unref (location);
+		return root;
+	}
+
+	return location;
+}
+
+static void
+maybe_query_computer_filesystem_info (NemoFile *file)
+{
+	GFile *location;
+	char *uri;
+	time_t now;
+
+	if (file->details->type != G_FILE_TYPE_MOUNTABLE) {
+		return;
+	}
+
+	location = nemo_file_get_location (file);
+	if (location == NULL || !g_file_has_uri_scheme (location, "computer")) {
+		if (location != NULL) {
+			g_object_unref (location);
+		}
+		return;
+	}
+
+	uri = g_file_get_uri (location);
+	if (uri != NULL && strcmp (uri, "computer:///") == 0) {
+		g_free (uri);
+		g_object_unref (location);
+		return;
+	}
+	g_free (uri);
+	g_object_unref (location);
+
+	now = time (NULL);
+	if (file->details->free_space_read != 0 && (now - file->details->free_space_read) <= 2) {
+		return;
+	}
+	file->details->free_space_read = now;
+
+	location = get_filesystem_query_location_for_computer (file);
+	g_file_query_filesystem_info_async (location,
+	                                    G_FILE_ATTRIBUTE_FILESYSTEM_FREE "," G_FILE_ATTRIBUTE_FILESYSTEM_SIZE,
+	                                    0, NULL,
+	                                    get_fs_free_cb,
+	                                    nemo_file_ref (file));
+	g_object_unref (location);
 }
 
 /**
@@ -7529,9 +7734,9 @@ nemo_file_get_volume_free_space (NemoFile *file)
 	if (file->details->free_space_read == 0 ||
 	    (now - file->details->free_space_read) > 2)  {
 		file->details->free_space_read = now;
-		location = nemo_file_get_location (file);
+		location = get_filesystem_query_location_for_computer (file);
 		g_file_query_filesystem_info_async (location,
-						    G_FILE_ATTRIBUTE_FILESYSTEM_FREE,
+					    G_FILE_ATTRIBUTE_FILESYSTEM_FREE "," G_FILE_ATTRIBUTE_FILESYSTEM_SIZE,
 						    0, NULL,
 						    get_fs_free_cb,
 						    nemo_file_ref (file));
