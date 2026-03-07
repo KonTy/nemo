@@ -4098,8 +4098,8 @@ load_error_callback (NemoDirectory *directory,
 	 */
 	nemo_view_stop_loading (view);
 
-    nemo_window_back_or_forward (NEMO_WINDOW (view->details->window),
-                                 TRUE, 0, FALSE);
+	nemo_window_back_or_forward (NEMO_WINDOW (view->details->window),
+				     TRUE, 0, FALSE);
 
 	/* Emit a signal to tell subclasses that a load error has
 	 * occurred, so they can handle it in the UI.

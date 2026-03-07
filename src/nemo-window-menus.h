@@ -36,4 +36,6 @@ void            menu_set_show_thumbnails_action (gboolean value, NemoWindow *win
 void            toolbar_set_create_folder_button (gboolean value, NemoWindowPane *pane);
 void            menu_set_view_selection (guint       action_id,
                                          NemoWindow *window);
+void            set_view_actions_sensitivity (NemoWindow *window,
+                                              gboolean    sensitive);
 #endif /* NEMO_WINDOW_PANE_H */

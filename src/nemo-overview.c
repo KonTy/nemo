@@ -18,6 +18,7 @@
 #include <glib/gi18n.h>
 #include <gio/gio.h>
 #include <math.h>
+#include <stdarg.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <dirent.h>
@@ -41,6 +42,8 @@
 #define VBAR_MAX_BARS       10   /* max bars per chart             */
 #define TOP_OFFENDERS_MAX   10   /* deep-scan ranked entries       */
 #define CACHE_RESCAN_SECS  120   /* background cache refresh period */
+#define SCAN_TIME_BUDGET_MS_UI     12000 /* per-volume interactive budget */
+#define SCAN_TIME_BUDGET_MS_CACHE   8000 /* per-volume cache refresh budget */
 
 /* ── Colours ───────────────────────────────────────────────────── */
 typedef struct { double r, g, b; } Rgb;
@@ -139,6 +142,42 @@ struct _NemoOverview {
 G_DEFINE_TYPE (NemoOverview, nemo_overview, GTK_TYPE_SCROLLED_WINDOW)
 
 /* ── Helpers ───────────────────────────────────────────────────── */
+
+static gboolean
+overview_scan_debug_enabled (void)
+{
+	static gsize once = 0;
+	static gboolean enabled = FALSE;
+
+	if (g_once_init_enter (&once)) {
+		const char *env = g_getenv ("NEMO_OVERVIEW_SCAN_DEBUG");
+		enabled = (env != NULL && *env != '\0' &&
+		           g_ascii_strcasecmp (env, "0") != 0 &&
+		           g_ascii_strcasecmp (env, "false") != 0 &&
+		           g_ascii_strcasecmp (env, "off") != 0 &&
+		           g_ascii_strcasecmp (env, "no") != 0);
+		g_once_init_leave (&once, 1);
+	}
+
+	return enabled;
+}
+
+static void
+overview_scan_debug_log (const char *fmt, ...)
+{
+	va_list ap;
+	char *msg;
+
+	if (!overview_scan_debug_enabled ())
+		return;
+
+	va_start (ap, fmt);
+	msg = g_strdup_vprintf (fmt, ap);
+	va_end (ap);
+
+	g_message ("[overview-scan] %s", msg);
+	g_free (msg);
+}
 
 static char *
 format_size_short (guint64 bytes)
@@ -404,12 +443,20 @@ scan_path_collect_top (const char  *path,
 	               dev_t        dev,
 	               GCancellable *cancel,
 	               GArray      *top,
-	               gboolean     include_self)
+	               gboolean     include_self,
+	               gint64       deadline_us,
+	               gboolean    *timed_out)
 {
 	DIR *dp;
 	struct dirent *entry;
 	struct stat pst;
 	guint64 total = 0;
+
+	if (deadline_us > 0 && g_get_monotonic_time () >= deadline_us) {
+		if (timed_out != NULL)
+			*timed_out = TRUE;
+		return 0;
+	}
 
 	if (g_cancellable_is_cancelled (cancel))
 		return 0;
@@ -434,6 +481,12 @@ scan_path_collect_top (const char  *path,
 		struct stat st;
 		char *child;
 
+		if (deadline_us > 0 && g_get_monotonic_time () >= deadline_us) {
+			if (timed_out != NULL)
+				*timed_out = TRUE;
+			break;
+		}
+
 		if (g_cancellable_is_cancelled (cancel))
 			break;
 
@@ -454,7 +507,9 @@ scan_path_collect_top (const char  *path,
 				                               dev,
 				                               cancel,
 				                               top,
-				                               TRUE);
+				                               TRUE,
+				                               deadline_us,
+				                               timed_out);
 			}
 		}
 
@@ -462,6 +517,9 @@ scan_path_collect_top (const char  *path,
 	}
 
 	closedir (dp);
+
+	if (!include_self && top->len == 0 && total > 0)
+		consider_top_offender (top, mount_path, path, total);
 
 	if (include_self)
 		consider_top_offender (top, mount_path, path, total);
@@ -661,6 +719,7 @@ gather_volumes (NemoOverview *self)
 		GMount *mount = G_MOUNT (l->data);
 		GFile *root;
 		GFileInfo *info;
+		char *mount_path_probe;
 		VolumeInfo v = { 0 };
 
 		if (g_mount_is_shadowed (mount))
@@ -678,6 +737,14 @@ gather_volumes (NemoOverview *self)
 		}
 
 		root = g_mount_get_root (mount);
+		mount_path_probe = g_file_get_path (root);
+		if (mount_path_probe == NULL) {
+			/* Skip remote/non-local mounts (e.g. mtp://, smb://) to avoid UI stalls. */
+			g_object_unref (root);
+			continue;
+		}
+		g_free (mount_path_probe);
+
 		info = g_file_query_filesystem_info (root,
 			G_FILE_ATTRIBUTE_FILESYSTEM_SIZE ","
 			G_FILE_ATTRIBUTE_FILESYSTEM_FREE ","
@@ -999,35 +1066,9 @@ create_pareto_chart (GArray *entries, int colour_idx)
 	return draw_area;
 }
 
-/* ── Idle callback: add one volume's charts to the UI ──────────── */
-
-static gboolean
-pareto_idle_cb (gpointer data)
+static void
+ensure_pareto_section_visible (NemoOverview *self)
 {
-	ScanResult *sr = data;
-	NemoOverview *self;
-	GtkWidget *volume_box;
-	GtkWidget *heading, *chart;
-	char *heading_text;
-	gboolean have_deep;
-	GList *children, *c;
-
-	if (g_cancellable_is_cancelled (sr->cancel)) {
-		g_object_unref (sr->self);
-		scan_result_free (sr);
-		return G_SOURCE_REMOVE;
-	}
-
-	self = sr->self;
-	have_deep = (sr->deep != NULL && sr->deep->len > 0);
-
-	if (!have_deep) {
-		g_object_unref (sr->self);
-		scan_result_free (sr);
-		return G_SOURCE_REMOVE;
-	}
-
-	/* Show separator + pareto box on first result */
 	if (!gtk_widget_get_visible (self->pareto_sep)) {
 		GtkWidget *section_lbl;
 		PangoAttrList *sa;
@@ -1049,16 +1090,159 @@ pareto_idle_cb (gpointer data)
 		gtk_widget_show (self->pareto_sep);
 		gtk_widget_show (self->pareto_box);
 	}
+}
 
-	/* Remove old section for this mount before adding refreshed one */
+static void
+remove_pareto_mount_box (NemoOverview *self, const char *mount_path)
+{
+	GList *children, *c;
+
 	children = gtk_container_get_children (GTK_CONTAINER (self->pareto_box));
 	for (c = children; c != NULL; c = c->next) {
 		GtkWidget *child = GTK_WIDGET (c->data);
 		const char *mp = g_object_get_data (G_OBJECT (child), "pareto-mount-path");
-		if (mp != NULL && g_strcmp0 (mp, sr->mount_path) == 0)
+		if (mp != NULL && g_strcmp0 (mp, mount_path) == 0)
 			gtk_widget_destroy (child);
 	}
 	g_list_free (children);
+}
+
+static gint
+volume_order_index_for_mount (NemoOverview *self, const char *mount_path)
+{
+	guint i;
+
+	if (self == NULL || self->volumes == NULL || mount_path == NULL)
+		return G_MAXINT;
+
+	for (i = 0; i < self->volumes->len; i++) {
+		VolumeInfo *v = &g_array_index (self->volumes, VolumeInfo, i);
+		if (g_strcmp0 (v->mount_path, mount_path) == 0)
+			return (gint) i;
+	}
+
+	return G_MAXINT;
+}
+
+static void
+add_pareto_mount_box_ordered (NemoOverview *self,
+			      GtkWidget    *volume_box,
+			      const char   *mount_path)
+{
+	GList *children, *c;
+	gint target_idx;
+	gint insert_pos = -1;
+	gint child_pos = 0;
+
+	target_idx = volume_order_index_for_mount (self, mount_path);
+
+	children = gtk_container_get_children (GTK_CONTAINER (self->pareto_box));
+	for (c = children; c != NULL; c = c->next, child_pos++) {
+		GtkWidget *child = GTK_WIDGET (c->data);
+		const char *mp = g_object_get_data (G_OBJECT (child), "pareto-mount-path");
+
+		if (mp == NULL)
+			continue;
+
+		if (volume_order_index_for_mount (self, mp) > target_idx) {
+			insert_pos = child_pos;
+			break;
+		}
+	}
+	g_list_free (children);
+
+	gtk_box_pack_start (GTK_BOX (self->pareto_box), volume_box, FALSE, FALSE, 0);
+	if (insert_pos >= 0)
+		gtk_box_reorder_child (GTK_BOX (self->pareto_box), volume_box, insert_pos);
+}
+
+static void
+add_pareto_placeholder (NemoOverview *self,
+	                    const char   *volume_name,
+	                    const char   *mount_path)
+{
+	GtkWidget *volume_box;
+	GtkWidget *heading;
+	GtkWidget *sub;
+	char *heading_text;
+
+	overview_scan_debug_log ("ui placeholder: volume='%s' mount='%s'",
+	                         volume_name,
+	                         mount_path);
+
+	ensure_pareto_section_visible (self);
+	remove_pareto_mount_box (self, mount_path);
+
+	volume_box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
+	gtk_widget_set_margin_bottom (volume_box, 8);
+	g_object_set_data_full (G_OBJECT (volume_box),
+	                        "pareto-mount-path",
+	                        g_strdup (mount_path),
+	                        g_free);
+
+	heading_text = g_strdup_printf ("%s  (%s)", volume_name, mount_path);
+	heading = gtk_label_new (heading_text);
+	g_free (heading_text);
+	{
+		PangoAttrList *ha = pango_attr_list_new ();
+		pango_attr_list_insert (ha, pango_attr_weight_new (PANGO_WEIGHT_BOLD));
+		pango_attr_list_insert (ha, pango_attr_scale_new (1.05));
+		gtk_label_set_attributes (GTK_LABEL (heading), ha);
+		pango_attr_list_unref (ha);
+	}
+	gtk_widget_set_halign (heading, GTK_ALIGN_START);
+	gtk_widget_set_margin_start (heading, 8);
+	gtk_widget_set_margin_top (heading, 16);
+	gtk_widget_set_margin_bottom (heading, 2);
+	gtk_box_pack_start (GTK_BOX (volume_box), heading, FALSE, FALSE, 0);
+	gtk_widget_show (heading);
+
+	sub = gtk_label_new (_("Scanning largest directories…"));
+	gtk_widget_set_opacity (sub, 0.6);
+	gtk_widget_set_halign (sub, GTK_ALIGN_START);
+	gtk_widget_set_margin_start (sub, 8);
+	gtk_widget_set_margin_top (sub, 4);
+	gtk_widget_set_margin_bottom (sub, 12);
+	gtk_box_pack_start (GTK_BOX (volume_box), sub, FALSE, FALSE, 0);
+	gtk_widget_show (sub);
+
+	add_pareto_mount_box_ordered (self, volume_box, mount_path);
+	gtk_widget_show (volume_box);
+}
+
+/* ── Idle callback: add one volume's charts to the UI ──────────── */
+
+static gboolean
+pareto_idle_cb (gpointer data)
+{
+	ScanResult *sr = data;
+	NemoOverview *self;
+	GtkWidget *volume_box;
+	GtkWidget *heading, *chart;
+	char *heading_text;
+	gboolean have_deep;
+
+	if (g_cancellable_is_cancelled (sr->cancel)) {
+		g_object_unref (sr->self);
+		scan_result_free (sr);
+		return G_SOURCE_REMOVE;
+	}
+
+	self = sr->self;
+	have_deep = (sr->deep != NULL && sr->deep->len > 0);
+	overview_scan_debug_log ("ui result: volume='%s' mount='%s' entries=%u",
+	                         sr->volume_name,
+	                         sr->mount_path,
+	                         sr->deep != NULL ? sr->deep->len : 0);
+
+	if (!have_deep) {
+		g_object_unref (sr->self);
+		scan_result_free (sr);
+		return G_SOURCE_REMOVE;
+	}
+
+	ensure_pareto_section_visible (self);
+	remove_pareto_mount_box (self, sr->mount_path);
 
 	volume_box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
 	gtk_widget_set_margin_bottom (volume_box, 8);
@@ -1179,7 +1363,7 @@ pareto_idle_cb (gpointer data)
 		gtk_widget_show (list_grid);
 	}
 
-	gtk_box_pack_start (GTK_BOX (self->pareto_box), volume_box, FALSE, FALSE, 0);
+	add_pareto_mount_box_ordered (self, volume_box, sr->mount_path);
 	gtk_widget_show (volume_box);
 
 	g_object_unref (sr->self);
@@ -1199,24 +1383,44 @@ scan_thread_func (gpointer data)
 		struct stat mount_st;
 		GArray *deep;
 		ScanResult *sr;
+		gint64 started_us;
+		gint64 elapsed_ms;
+		gint64 deadline_us;
+		gboolean timed_out = FALSE;
 
 		if (g_cancellable_is_cancelled (td->cancel))
 			break;
 
-		if (stat (td->mount_paths[i], &mount_st) != 0)
+		started_us = g_get_monotonic_time ();
+		overview_scan_debug_log ("scan start: volume='%s' mount='%s'",
+		                         td->volume_names[i],
+		                         td->mount_paths[i]);
+
+		if (stat (td->mount_paths[i], &mount_st) != 0) {
+			overview_scan_debug_log ("scan skip (stat failed): mount='%s'",
+			                         td->mount_paths[i]);
 			continue;
+		}
 
 		deep = g_array_new (FALSE, TRUE, sizeof (DirSizeEntry));
 		g_array_set_clear_func (deep, (GDestroyNotify) dir_size_entry_clear);
+		deadline_us = started_us + ((gint64) SCAN_TIME_BUDGET_MS_UI * 1000);
 
 		scan_path_collect_top (td->mount_paths[i],
 		                      td->mount_paths[i],
 		                      mount_st.st_dev,
 		                      td->cancel,
 		                      deep,
-		                      FALSE);
+		                      FALSE,
+		                      deadline_us,
+		                      &timed_out);
+
+		elapsed_ms = (g_get_monotonic_time () - started_us) / 1000;
 
 		if (g_cancellable_is_cancelled (td->cancel)) {
+			overview_scan_debug_log ("scan cancelled: mount='%s' elapsed=%" G_GINT64_FORMAT "ms",
+			                         td->mount_paths[i],
+			                         elapsed_ms);
 			g_array_unref (deep);
 			break;
 		}
@@ -1233,6 +1437,16 @@ scan_thread_func (gpointer data)
 		sr->mount_path  = g_strdup (td->mount_paths[i]);
 		sr->colour_idx  = td->colour_idxs[i];
 		sr->deep        = deep;
+
+		overview_scan_debug_log ("scan done: mount='%s' entries=%u elapsed=%" G_GINT64_FORMAT "ms",
+		                         td->mount_paths[i],
+		                         deep->len,
+		                         elapsed_ms);
+		if (timed_out) {
+			overview_scan_debug_log ("scan timed out (approximate): mount='%s' budget=%dms",
+			                         td->mount_paths[i],
+			                         SCAN_TIME_BUDGET_MS_UI);
+		}
 
 		g_idle_add (pareto_idle_cb, sr);
 	}
@@ -1325,6 +1539,8 @@ cache_scan_thread_func (gpointer data)
 	for (i = 0; i < job->n_volumes; i++) {
 		struct stat mount_st;
 		GArray *deep;
+		gint64 deadline_us;
+		gboolean timed_out = FALSE;
 
 		if (g_scan_cache_cancel != NULL &&
 		    g_cancellable_is_cancelled (g_scan_cache_cancel))
@@ -1335,13 +1551,22 @@ cache_scan_thread_func (gpointer data)
 
 		deep = g_array_new (FALSE, TRUE, sizeof (DirSizeEntry));
 		g_array_set_clear_func (deep, (GDestroyNotify) dir_size_entry_clear);
+		deadline_us = g_get_monotonic_time () + ((gint64) SCAN_TIME_BUDGET_MS_CACHE * 1000);
 
 		scan_path_collect_top (job->mount_paths[i],
 		                      job->mount_paths[i],
 		                      mount_st.st_dev,
 		                      g_scan_cache_cancel,
 		                      deep,
-		                      FALSE);
+		                      FALSE,
+		                      deadline_us,
+		                      &timed_out);
+
+		if (timed_out) {
+			overview_scan_debug_log ("cache scan timed out (approximate): mount='%s' budget=%dms",
+			                         job->mount_paths[i],
+			                         SCAN_TIME_BUDGET_MS_CACHE);
+		}
 
 		if (g_scan_cache_cancel != NULL &&
 		    g_cancellable_is_cancelled (g_scan_cache_cancel)) {
@@ -1409,6 +1634,7 @@ start_background_scan (NemoOverview *self)
 {
 	ScanThreadData *td;
 	guint i;
+	guint idx;
 
 	if (self->volumes->len == 0)
 		return;
@@ -1433,10 +1659,18 @@ start_background_scan (NemoOverview *self)
 		sr->volume_name = g_strdup (v->name);
 		sr->mount_path = g_strdup (v->mount_path);
 		sr->colour_idx = v->colour_idx;
-		if (scan_cache_lookup_copy (v->mount_path, sr))
+		if (scan_cache_lookup_copy (v->mount_path, sr)) {
+			overview_scan_debug_log ("cache hit: volume='%s' mount='%s'",
+			                         v->name,
+			                         v->mount_path);
 			g_idle_add (pareto_idle_cb, sr);
-		else
+		} else {
+			overview_scan_debug_log ("cache miss: volume='%s' mount='%s'",
+			                         v->name,
+			                         v->mount_path);
+			add_pareto_placeholder (self, v->name, v->mount_path);
 			scan_result_free (sr);
+		}
 	}
 
 	/* Always keep background rescans running for freshness */
@@ -1450,11 +1684,24 @@ start_background_scan (NemoOverview *self)
 	td->volume_names = g_new0 (char *, td->n_volumes);
 	td->colour_idxs  = g_new0 (int, td->n_volumes);
 
-	for (i = 0; i < td->n_volumes; i++) {
+	idx = 0;
+	for (i = 0; i < self->volumes->len; i++) {
 		VolumeInfo *v = &g_array_index (self->volumes, VolumeInfo, i);
-		td->mount_paths[i]  = g_strdup (v->mount_path);
-		td->volume_names[i] = g_strdup (v->name);
-		td->colour_idxs[i]  = v->colour_idx;
+		if (g_strcmp0 (v->mount_path, "/") == 0)
+			continue;
+		td->mount_paths[idx]  = g_strdup (v->mount_path);
+		td->volume_names[idx] = g_strdup (v->name);
+		td->colour_idxs[idx]  = v->colour_idx;
+		idx++;
+	}
+	for (i = 0; i < self->volumes->len; i++) {
+		VolumeInfo *v = &g_array_index (self->volumes, VolumeInfo, i);
+		if (g_strcmp0 (v->mount_path, "/") != 0)
+			continue;
+		td->mount_paths[idx]  = g_strdup (v->mount_path);
+		td->volume_names[idx] = g_strdup (v->name);
+		td->colour_idxs[idx]  = v->colour_idx;
+		idx++;
 	}
 
 	g_thread_unref (g_thread_new ("overview-scan", scan_thread_func, td));

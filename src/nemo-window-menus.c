@@ -331,9 +331,9 @@ action_about_nemo_callback (GtkAction *action,
 	date = g_date_time_new_now_local ();
 
 	gtk_show_about_dialog (GTK_WINDOW (user_data),
-			       "program-name", _("smplos-nemo"),
+			       "program-name", _("nemo-smpl"),
 			       "version", VERSION,
-			       "comments", _("smplos-nemo lets you organize "
+			       "comments", _("nemo-smpl lets you organize "
 					     "files and folders, both on "
 					     "your computer and online. "
 					     "It is a community-maintained fork of Nemo."),
@@ -1617,6 +1617,10 @@ set_content_view_type(NemoWindow *window,
     NemoWindowSlot *slot;
 
     slot = nemo_window_get_active_slot (window);
+
+	if (slot == NULL || slot->location == NULL || slot->content_view == NULL)
+		return;
+
     nemo_window_slot_set_content_view (slot, view_id);
 }
 
@@ -1747,6 +1751,46 @@ toolbar_set_view_button (guint action_id, NemoWindow *window)
                            action_compact_view_callback,
                            window);
 
+}
+
+void
+set_view_actions_sensitivity (NemoWindow *window,
+			      gboolean    sensitive)
+{
+	GtkAction *action;
+	GtkAction *action1;
+	GtkAction *action2;
+	GtkActionGroup *toolbar_group;
+
+	if (window == NULL)
+		return;
+
+	toolbar_group = nemo_window_pane_get_toolbar_action_group (nemo_window_get_active_pane (window));
+
+	action = gtk_action_group_get_action (toolbar_group, NEMO_ACTION_ICON_VIEW);
+	action1 = gtk_action_group_get_action (toolbar_group, NEMO_ACTION_LIST_VIEW);
+	action2 = gtk_action_group_get_action (toolbar_group, NEMO_ACTION_COMPACT_VIEW);
+
+	if (action != NULL)
+		gtk_action_set_sensitive (action, sensitive);
+	if (action1 != NULL)
+		gtk_action_set_sensitive (action1, sensitive);
+	if (action2 != NULL)
+		gtk_action_set_sensitive (action2, sensitive);
+
+	action = gtk_action_group_get_action (window->details->main_action_group,
+	                                      NEMO_ACTION_ICON_VIEW);
+	action1 = gtk_action_group_get_action (window->details->main_action_group,
+	                                       NEMO_ACTION_LIST_VIEW);
+	action2 = gtk_action_group_get_action (window->details->main_action_group,
+	                                       NEMO_ACTION_COMPACT_VIEW);
+
+	if (action != NULL)
+		gtk_action_set_sensitive (action, sensitive);
+	if (action1 != NULL)
+		gtk_action_set_sensitive (action1, sensitive);
+	if (action2 != NULL)
+		gtk_action_set_sensitive (action2, sensitive);
 }
 
 void

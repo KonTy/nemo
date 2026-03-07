@@ -86,7 +86,7 @@ All installation methods automatically set up MTP device access. After installat
 
 ---
 
-## Release Notes — v1.0.3
+## Release Notes — v1.0.4
 
 ### 🎯 MTP Device Support - Fixed & Hardened
 
@@ -158,20 +158,20 @@ Developer Gwendal Le Bihan named the project "nemo" after Jules Verne's famous c
 
 ## smplos-nemo vs Stock Nemo: Feature Comparison
 
-| Feature | Stock Nemo | smplos-nemo | Status |
-|---------|-----------|------------|--------|
-| **File Management** | ✅ | ✅ | Both excellent |
-| **MTP (Android/Phone)** | ⚠️ Broken* | ✅ Working | **Fixed in smplos-nemo** |
-| **Preview Pane** | ❌ | ✅ | smplos-nemo exclusive |
-| **GPS Map Preview** | ❌ | ✅ | smplos-nemo exclusive |
-| **Archive Browsing** | ❌ | ✅ | smplos-nemo exclusive |
-| **Disk Usage Chart** | ❌ | ✅ | smplos-nemo exclusive |
-| **Configurable Shortcuts** | ❌ | ✅ | smplos-nemo exclusive |
-| **Substring Search** | Prefix only | Substring | smplos-nemo improved |
-| **Tab-based Panes** | ❌ | ✅ | smplos-nemo exclusive |
-| **GIO/GVFS Support** | ✅ | ✅ | Both |
-| **Open as Root** | ✅ | ✅ | Both |
-| **SSH/Remote Filesystems** | ✅ | ✅ | Both |
+| Feature | Stock Nemo | smplos-nemo | Status | Demo |
+|---------|-----------|------------|--------|------|
+| **File Management** | ✅ | ✅ | Both excellent | — |
+| **MTP (Android/Phone)** | ⚠️ Broken* | ✅ Working | **Fixed in smplos-nemo** | Planned (GIF #1) |
+| **Preview Pane** | ❌ | ✅ | smplos-nemo exclusive | [GIF #1](Documents/media/gifs/01-preview-gps.gif) |
+| **GPS Map Preview** | ❌ | ✅ | smplos-nemo exclusive | [Screenshot](Documents/map_preview.png) |
+| **Archive Browsing** | ❌ | ✅ | smplos-nemo exclusive | [GIF #3](Documents/media/gifs/03-archive-browse.gif) |
+| **Disk Usage Chart** | ❌ | ✅ | smplos-nemo exclusive | [GIF #4](Documents/media/gifs/04-disk-usage.gif) |
+| **Configurable Shortcuts** | ❌ | ✅ | smplos-nemo exclusive | [Screenshot](Documents/key%20bindings.png), [GIF #5](Documents/media/gifs/05-keybindings.gif) |
+| **Substring Search** | Prefix only | Substring | smplos-nemo improved | Planned |
+| **Tab-based Panes** | ❌ | ✅ | smplos-nemo exclusive | Planned |
+| **GIO/GVFS Support** | ✅ | ✅ | Both | — |
+| **Open as Root** | ✅ | ✅ | Both | — |
+| **SSH/Remote Filesystems** | ✅ | ✅ | Both | — |
 
 *Stock Nemo has MTP support but users report frequent "Unable to mount" errors due to competing device handlers (gphoto2, KDE kiod6). smplos-nemo fixes this with automatic udev rules and retry logic.
 

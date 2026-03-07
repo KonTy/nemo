@@ -1,6 +1,6 @@
 # smplos-nemo Features & Release Notes
 
-**Current Version:** v1.0.3  
+**Current Version:** v1.0.4  
 **Release Date:** March 7, 2026
 
 ---

@@ -338,20 +338,9 @@ create_mtp_unlock_box (void)
 }
 
 static gboolean
-uri_is_mtp_root (const char *uri)
+uri_is_mtp_location (const char *uri)
 {
-	const char *closing;
-
-	if (uri == NULL || !g_str_has_prefix (uri, "mtp://[")) {
-		return FALSE;
-	}
-
-	closing = strchr (uri, ']');
-	if (closing == NULL) {
-		return FALSE;
-	}
-
-	return g_strcmp0 (closing + 1, "/") == 0;
+	return (uri != NULL && g_str_has_prefix (uri, "mtp://"));
 }
 
 static gboolean
@@ -370,7 +359,10 @@ error_looks_like_locked_mtp (GError *error)
 		(g_strstr_len (lower, -1, "unlock") != NULL) ||
 		(g_strstr_len (lower, -1, "permission denied") != NULL) ||
 		(g_strstr_len (lower, -1, "not authorized") != NULL) ||
-		(g_strstr_len (lower, -1, "access denied") != NULL);
+		(g_strstr_len (lower, -1, "access denied") != NULL) ||
+		(g_strstr_len (lower, -1, "unable to open mtp device") != NULL) ||
+		(g_strstr_len (lower, -1, "cannot open mtp device") != NULL) ||
+		(g_strstr_len (lower, -1, "libmtp") != NULL);
 	g_free (lower);
 
 	return looks_locked;
@@ -390,7 +382,7 @@ mtp_unlock_retry_cb (gpointer user_data)
 	}
 
 	uri = g_file_get_uri (slot->location);
-	if (!uri_is_mtp_root (uri)) {
+	if (!uri_is_mtp_location (uri)) {
 		g_free (uri);
 		gtk_widget_hide (slot->mtp_unlock_box);
 		slot->mtp_retry_timeout_id = 0;
@@ -433,7 +425,7 @@ view_load_error_cb (NemoView *view,
 	}
 
 	uri = g_file_get_uri (slot->location);
-	if (uri_is_mtp_root (uri) && error_looks_like_locked_mtp (error)) {
+	if (uri_is_mtp_location (uri) && error_looks_like_locked_mtp (error)) {
 		mtp_unlock_overlay_set_visible (slot, TRUE);
 	}
 	g_free (uri);
@@ -494,32 +486,32 @@ view_end_loading_cb (NemoView       *view,
 {
 	gboolean show_mtp_unlock = FALSE;
 	char *uri = NULL;
+	NemoDirectory *directory;
 
 	if (slot->needs_reload) {
 		nemo_window_slot_queue_reload (slot, FALSE);
 		slot->needs_reload = FALSE;
-	} else if (all_files_seen) {
-        NemoDirectory *directory;
+	}
 
-        directory = nemo_directory_get_for_file (slot->viewed_file);
+	directory = nemo_directory_get_for_file (slot->viewed_file);
 
-        if (NEMO_IS_SEARCH_DIRECTORY (directory)) {
-            if (!nemo_directory_is_not_empty (directory)) {
-                gtk_widget_show (slot->no_search_results_box);
-            } else {
-                gtk_widget_hide (slot->no_search_results_box);
+	if (all_files_seen && NEMO_IS_SEARCH_DIRECTORY (directory)) {
+		if (!nemo_directory_is_not_empty (directory)) {
+			gtk_widget_show (slot->no_search_results_box);
+		} else {
+			gtk_widget_hide (slot->no_search_results_box);
+		}
+	}
 
-            }
-        }
-
-		uri = slot->location ? g_file_get_uri (slot->location) : NULL;
-		if (uri_is_mtp_root (uri) && !nemo_directory_is_not_empty (directory)) {
+	uri = slot->location ? g_file_get_uri (slot->location) : NULL;
+	if (uri_is_mtp_location (uri)) {
+		if (!nemo_directory_is_not_empty (directory)) {
 			show_mtp_unlock = TRUE;
 		}
+	}
 
-        nemo_directory_unref (directory);
-		g_free (uri);
-    }
+	nemo_directory_unref (directory);
+	g_free (uri);
 
 	mtp_unlock_overlay_set_visible (slot, show_mtp_unlock);
 }

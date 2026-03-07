@@ -35,6 +35,7 @@
 #include "nemo-pathbar.h"
 #include "nemo-window-private.h"
 #include "nemo-window-slot.h"
+#include "nemo-window-menus.h"
 #include "nemo-trash-bar.h"
 #include "nemo-view-factory.h"
 #include "nemo-x-content-bar.h"
@@ -606,6 +607,7 @@ nemo_window_slot_open_location_full (NemoWindowSlot *slot,
             if (target_slot == nemo_window_get_active_slot (target_window)) {
                 nemo_window_pane_sync_up_actions (target_slot->pane);
                 nemo_window_pane_sync_location_widgets (target_slot->pane);
+				set_view_actions_sensitivity (target_window, FALSE);
             }
 
             if (old_location != NULL)
@@ -870,6 +872,7 @@ begin_location_change (NemoWindowSlot        *slot,
             if (slot == nemo_window_get_active_slot (nemo_window_slot_get_window (slot))) {
                 nemo_window_pane_sync_up_actions (slot->pane);
                 nemo_window_pane_sync_location_widgets (slot->pane);
+				set_view_actions_sensitivity (nemo_window_slot_get_window (slot), FALSE);
             }
 
             /* Fire the completion callback, then clean up pending state. */
@@ -1932,7 +1935,7 @@ display_view_selection_failure (NemoWindow *window, NemoFile *file,
 			scheme_string = g_file_get_uri_scheme (location);
 
 			error_message = g_strdup_printf (_("Could not display \"%s\"."),
-							 uri_for_display);
+						 uri_for_display);
 			if (scheme_string != NULL) {
 				detail_message = g_strdup_printf (_("Nemo cannot handle \"%s\" locations."),
 								  scheme_string);
@@ -2038,7 +2041,8 @@ nemo_window_slot_set_content_view (NemoWindowSlot *slot,
 
     nemo_window_slot_set_allow_stop (slot, TRUE);
 
-    if (nemo_view_get_selection_count (slot->content_view) == 0) {
+	if (slot->content_view != NULL &&
+	    nemo_view_get_selection_count (slot->content_view) == 0) {
             /* If there is no selection, queue a scroll to the same icon that
              * is currently visible */
             slot->pending_scroll_to = nemo_view_get_first_visible_file (slot->content_view);
