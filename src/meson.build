@@ -47,6 +47,7 @@ nemoCommon_sources = [
   'nemo-location-bar.c',
   'nemo-location-entry.c',
   'nemo-mime-actions.c',
+  'nemo-archive-mounter.c',
   'nemo-navigation-action.c',
   'nemo-navigation-state.c',
   'nemo-notebook.c',

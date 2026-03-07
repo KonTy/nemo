@@ -29,6 +29,7 @@
 #include "nemo-window-slot.h"
 #include "nemo-error-reporting.h"
 #include "nemo-desktop-window.h"
+#include "nemo-archive-mounter.h"
 
 #include <eel/eel-glib-extensions.h>
 #include <eel/eel-stock-dialogs.h>
@@ -2255,6 +2256,47 @@ nemo_mime_activate_files (GtkWindow *parent_window,
 	}
 
 	DEBUG_FILES (files, "Calling activate_files() with files:");
+
+	/* Check if this is a single archive file that should be mounted and browsed */
+	if (g_list_length (files) == 1 && slot != NULL) {
+		NemoFile *file = files->data;
+		gchar *mime_type = nemo_file_get_mime_type (file);
+		
+		if (mime_type != NULL && nemo_archive_mounter_is_archive (mime_type)) {
+			gchar *archive_path = nemo_file_get_path (file);
+			
+			if (archive_path != NULL) {
+				GError *error = NULL;
+				gchar *mount_point = nemo_archive_mounter_mount (archive_path, mime_type, &error);
+				
+				if (mount_point != NULL) {
+					/* Open the mounted archive location in Nemo */
+					GFile *location = g_file_new_for_path (mount_point);
+					nemo_window_slot_open_location_full (slot, location, flags, NULL, NULL, NULL);
+					g_object_unref (location);
+					g_free (mount_point);
+					g_free (archive_path);
+					g_free (mime_type);
+					return;
+				} else {
+					/* Show error dialog if mounting failed */
+					if (error != NULL) {
+						gchar *display_name = nemo_file_get_display_name (file);
+						gchar *message = g_strdup_printf (_("Could not open archive \"%s\": %s"),
+						                                 display_name, error->message);
+						eel_show_error_dialog (_("Archive Opening Failed"), message, parent_window);
+						g_free (message);
+						g_free (display_name);
+						g_error_free (error);
+					}
+					g_free (archive_path);
+				}
+			}
+			g_free (mime_type);
+		} else {
+			g_free (mime_type);
+		}
+	}
 
 	parameters = g_new0 (ActivateParameters, 1);
 	parameters->slot = slot;
