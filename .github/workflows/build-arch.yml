@@ -45,7 +45,7 @@ jobs:
       - name: Create Arch test artifact
         run: |
           VERSION=$(grep -Po "version\s*:\s*'\K[^']+" meson.build | head -n1)
-          ARTIFACT="smplos-nemo-${VERSION}-arch-x86_64-rootfs.tar.zst"
+          ARTIFACT="nemo-smpl-${VERSION}-arch-x86_64-rootfs.tar.zst"
           tar -C stage -I 'zstd -19 -T0' -cf "$ARTIFACT" .
           echo "Created $ARTIFACT"
           echo "VERSION=${VERSION}" >> $GITHUB_ENV
@@ -53,17 +53,17 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: smplos-nemo-arch-rootfs
-          path: smplos-nemo-*-arch-x86_64-rootfs.tar.zst
+          name: nemo-smpl-arch-rootfs
+          path: nemo-smpl-*-arch-x86_64-rootfs.tar.zst
           retention-days: 14
 
       - name: Create or update GitHub Release
         if: github.event_name == 'push' && github.ref == 'refs/heads/release'
         uses: softprops/action-gh-release@v1
         with:
-          files: smplos-nemo-*-arch-x86_64-rootfs.tar.zst
+          files: nemo-smpl-*-arch-x86_64-rootfs.tar.zst
           tag_name: v${{ env.VERSION }}
-          name: smplos-nemo ${{ env.VERSION }}
+          name: nemo-smpl ${{ env.VERSION }}
           body: |
             Automated build from release branch
             - Version: ${{ env.VERSION }}

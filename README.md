@@ -1,11 +1,11 @@
 ![build](https://github.com/linuxmint/nemo/actions/workflows/build.yml/badge.svg)
 
-smplos-nemo
-===========
+nemo-smpl
+=========
 
-**smplos-nemo** is an enhanced fork of [Nemo](https://github.com/linuxmint/nemo), the file manager for the Cinnamon desktop environment. While we actively contribute improvements upstream, this fork exists because many of our features have been rejected or deemed out-of-scope by the upstream maintainers.
+**nemo-smpl** is an enhanced fork of [Nemo](https://github.com/linuxmint/nemo), the file manager for the Cinnamon desktop environment. While we actively contribute improvements upstream, this fork exists because many of our features have been rejected or deemed out-of-scope by the upstream maintainers.
 
-This fork is maintained for the **smplos** Linux distribution, ensuring users get a feature-rich file manager with modern UX improvements, better device support, and advanced preview capabilities.
+This fork is maintained for the **smplOS** Linux distribution, ensuring users get a feature-rich file manager with modern UX improvements, better device support, and advanced preview capabilities.
 
 ## Why Fork?
 
