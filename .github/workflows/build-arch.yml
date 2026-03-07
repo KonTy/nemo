@@ -27,6 +27,21 @@ jobs:
             libexif exempi gstreamer gst-plugins-base-libs \
             pango gobject-introspection libgsf python zstd
 
+          # Some Arch images split development tools; make sure gdbus-codegen exists.
+          if ! command -v gdbus-codegen >/dev/null 2>&1; then
+            pacman -S --noconfirm --needed glib2-devel || true
+          fi
+
+          if ! command -v gdbus-codegen >/dev/null 2>&1; then
+            echo "::error::gdbus-codegen not found after dependency install"
+            exit 1
+          fi
+
+          gdbus-codegen --version || {
+            echo "::error::gdbus-codegen exists but is not runnable"
+            exit 1
+          }
+
       - name: Configure
         run: |
           meson setup build \
