@@ -30,29 +30,21 @@ jobs:
             libexif-dev libexempi-dev libgstreamer1.0-dev \
             libgstreamer-plugins-base1.0-dev libgsf-1-dev \
             gobject-introspection libgirepository1.0-dev \
-            gtk-doc-tools cinnamon-l10n
+            gtk-doc-tools cinnamon-l10n libgtk-layer-shell-dev \
+            libpango1.0-dev libatk1.0-dev libgail-3-dev
 
       - name: Build Debian package
         run: |
           # Extract version
           VERSION=$(grep -Po "version\s*:\s*'\K[^']+" meson.build | head -n1)
-          
-          # Create source structure
-          mkdir -p debian-build
-          cd debian-build
-          
-          # Copy source and debian files
-          cp -r .. nemo-${VERSION}
-          cd nemo-${VERSION}
-          
-          # Build package
-          debuild -us -uc
-          
-          cd ..
-          
-          # Move debs to workspace root
-          cp *.deb ../
           echo "VERSION=${VERSION}" >> $GITHUB_ENV
+          
+          # Build directly in source tree
+          dpkg-buildpackage -us -uc -b
+          
+          # Move debs to a results directory
+          mkdir -p debian-build
+          mv ../*.deb debian-build/ || true
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
