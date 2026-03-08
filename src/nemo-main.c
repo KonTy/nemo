@@ -91,8 +91,40 @@ main (int argc, char *argv[])
 	xmp_init();
 #endif
 
+	/* Parse --class / -c <id> to allow setting a custom WM_CLASS / app-id.
+	 * This is consumed here and stripped from argv so GApplication never
+	 * sees it as an unknown option.  Useful for compositor window-rules,
+	 * e.g. launch with --class nemo-float and set a float rule on that class. */
+	const char *custom_app_id = NULL;
+	for (int i = 1; i < argc; i++) {
+		if ((g_strcmp0 (argv[i], "--class") == 0 || g_strcmp0 (argv[i], "-c") == 0)
+		    && i + 1 < argc) {
+			custom_app_id = argv[i + 1];
+			/* Remove both the flag and its value from argv */
+			for (int j = i; j < argc - 2; j++)
+				argv[j] = argv[j + 2];
+			argc -= 2;
+			break;
+		}
+	}
+
 	/* Run the nemo application. */
 	application = nemo_main_application_get_singleton ();
+
+	if (custom_app_id != NULL) {
+		/* GApplication requires a valid reverse-DNS ID (must contain dots).
+		 * If the user passed a short name like "nemo-float", prefix it so
+		 * it becomes "org.Nemo.float" — still unique for compositor rules. */
+		gchar *full_id;
+		if (strchr (custom_app_id, '.') == NULL) {
+			full_id = g_strdup_printf ("org.Nemo.%s", custom_app_id);
+		} else {
+			full_id = g_strdup (custom_app_id);
+		}
+		g_application_set_application_id (G_APPLICATION (application), full_id);
+		g_set_prgname (full_id);
+		g_free (full_id);
+	}
 
     /* hold indefinitely if we're asked to persist */
     if (g_getenv ("NEMO_PERSIST") != NULL) {
