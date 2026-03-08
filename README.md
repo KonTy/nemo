@@ -18,6 +18,7 @@ We've implemented numerous features that enhance the file manager experience:
 - **Substring Search** for smarter file discovery
 - **Configurable Keyboard Shortcuts** for power users
 - **Tab-based Pane Splitting** for advanced multitasking
+- **smplOS Live Theming** — accent colors, backgrounds, and selection highlights update instantly when you run `theme-set`
 
 While we've contributed some improvements upstream, several features were rejected as out-of-scope or too niche for the core Nemo project. Rather than compromise the user experience, we maintain this enhanced version for smplos users.
 
@@ -83,6 +84,52 @@ All installation methods automatically set up MTP device access. After installat
 - Phone not showing up? Unlock your phone screen first (MTP requires unlocked device for security)
 - Still issues? Run `mtp-detect` in terminal to verify device compatibility
 - Try another MTP app? Use `sudo pacman -S android-file-transfer` as a fallback
+
+---
+
+## Release Notes — v1.1.0
+
+### 🎨 smplOS Live Theming
+
+Nemo now integrates directly with the smplOS theme system. Switch themes with `theme-set <name>` and every color — accents, backgrounds, sidebar, selection highlights — updates **instantly** with no nemo restart required.
+
+**How it works:**
+- `theme-set` writes a per-theme `nemo.css` to `~/.config/smplos/nemo-theme.css`
+- nemo-smpl loads this file at startup and watches it with `GFileMonitor`
+- On any file change, `GtkCssProvider` reloads and `gtk_style_context_reset_widgets()` repaints immediately
+- All 15 smplOS themes (hackerman, ethereal, catppuccin, tokyo-night, …) ship pre-baked `nemo.css` files
+- Upstream-safe: the entire feature is compiled under `#ifdef SMPLOS` — patches sent upstream contain none of this code
+
+**What gets themed:**
+- ✅ Window background, header bar, sidebar
+- ✅ File list / icon grid selection color → `accent`
+- ✅ Inactive split-pane shading → `bg_lighter`
+- ✅ Desktop icon labels and selection highlight
+- ✅ Floating status bar, rename entry border
+- ✅ Scrollbar handle color
+
+---
+
+## Release Notes — v1.1.0
+
+### 🎨 smplOS Live Theming
+
+Nemo now integrates directly with the smplOS theme system. Switch themes with `theme-set <name>` and every color — accents, backgrounds, sidebar, selection highlights — updates **instantly** with no nemo restart required.
+
+**How it works:**
+- `theme-set` writes a per-theme `nemo.css` to `~/.config/smplos/nemo-theme.css`
+- nemo-smpl loads this file at startup and watches it with `GFileMonitor`
+- On any file change, `GtkCssProvider` reloads and `gtk_style_context_reset_widgets()` repaints immediately
+- All 15 smplOS themes (hackerman, ethereal, catppuccin, tokyo-night, …) ship pre-baked `nemo.css` files
+- Upstream-safe: the entire feature is compiled under `#ifdef SMPLOS` — patches sent upstream contain none of this code
+
+**What gets themed:**
+- ✅ Window background, header bar, sidebar
+- ✅ File list / icon grid selection color → `accent`
+- ✅ Inactive split-pane shading → `bg_lighter`
+- ✅ Desktop icon labels and selection highlight
+- ✅ Floating status bar, rename entry border
+- ✅ Scrollbar handle color
 
 ---
 
@@ -169,6 +216,7 @@ Developer Gwendal Le Bihan named the project "nemo" after Jules Verne's famous c
 | **Configurable Shortcuts** | ❌ | ✅ | smplos-nemo exclusive | [Screenshot](Documents/key%20bindings.png), [GIF #5](Documents/media/gifs/05-keybindings.gif) |
 | **Substring Search** | Prefix only | Substring | smplos-nemo improved | Planned |
 | **Tab-based Panes** | ❌ | ✅ | smplos-nemo exclusive | Planned |
+| **smplOS Live Theming** | ❌ | ✅ | smplos-nemo exclusive | — |
 | **GIO/GVFS Support** | ✅ | ✅ | Both | — |
 | **Open as Root** | ✅ | ✅ | Both | — |
 | **SSH/Remote Filesystems** | ✅ | ✅ | Both | — |
@@ -364,6 +412,7 @@ Seamless support for Android devices and other MTP-capable devices, making them 
 | Substring Search | ❌ Not implemented | ✅ Full implementation |
 | Tab Pane Switching | ❌ Not available | ✅ Tab key navigation |
 | Configurable Shortcuts | ❌ Not available | ✅ Full customization |
+| smplOS Live Theming | ❌ Not available | ✅ GFileMonitor live CSS reload |
 | Performance Fixes | ⚠️ Upstream varies | ✅ USB throttling, memory leaks fixed |
 
 ---

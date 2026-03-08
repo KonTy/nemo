@@ -102,6 +102,12 @@ static gboolean save_of_accel_map_requested = FALSE;
 
 static GtkCssProvider *mandatory_css_provider = NULL;
 
+#ifdef SMPLOS
+/* smplOS: per-theme CSS override loaded from ~/.config/smplos/nemo-theme.css */
+static GtkCssProvider *smplos_css_provider    = NULL;
+static GFileMonitor   *smplos_css_monitor     = NULL;
+#endif /* SMPLOS */
+
 static gboolean
 css_provider_load_from_resource (GtkCssProvider *provider,
                      const char     *resource_path,
@@ -144,6 +150,95 @@ load_file_contents_from_resource (const char     *resource_path,
 
    return retval;
 }
+
+#ifdef SMPLOS
+/* smplOS theme loader ------------------------------------------------
+ * Loads ~/.config/smplos/nemo-theme.css at GTK_STYLE_PROVIDER_PRIORITY_USER
+ * (800), which overrides everything including Adwaita and nemo's own CSS.
+ * A GFileMonitor keeps the provider in sync when theme-set rewrites the file,
+ * giving live theme switching with no nemo restart.
+ * ------------------------------------------------------------------ */
+
+static void
+reload_smplos_theme (void)
+{
+    gchar *css_path;
+    GError *error = NULL;
+
+    css_path = g_build_filename (g_get_home_dir (), ".config", "smplos",
+                                 "nemo-theme.css", NULL);
+
+    if (!g_file_test (css_path, G_FILE_TEST_EXISTS)) {
+        g_free (css_path);
+        return;
+    }
+
+    if (smplos_css_provider == NULL) {
+        smplos_css_provider = gtk_css_provider_new ();
+        gtk_style_context_add_provider_for_screen (
+            gdk_screen_get_default (),
+            GTK_STYLE_PROVIDER (smplos_css_provider),
+            GTK_STYLE_PROVIDER_PRIORITY_USER);
+    }
+
+    gtk_css_provider_load_from_path (smplos_css_provider, css_path, &error);
+
+    if (error != NULL) {
+        g_warning ("smplOS: failed to load nemo-theme.css: %s", error->message);
+        g_error_free (error);
+    } else {
+        gtk_style_context_reset_widgets (gdk_screen_get_default ());
+    }
+
+    g_free (css_path);
+}
+
+static void
+on_smplos_theme_changed (GFileMonitor      *monitor,
+                         GFile             *file,
+                         GFile             *other_file,
+                         GFileMonitorEvent  event_type,
+                         gpointer           user_data)
+{
+    (void) monitor; (void) file; (void) other_file; (void) user_data;
+
+    if (event_type == G_FILE_MONITOR_EVENT_CHANGED ||
+        event_type == G_FILE_MONITOR_EVENT_CREATED) {
+        reload_smplos_theme ();
+    }
+}
+
+static void
+load_smplos_theme (void)
+{
+    gchar *css_path;
+    GFile *css_file;
+    GError *error = NULL;
+
+    css_path = g_build_filename (g_get_home_dir (), ".config", "smplos",
+                                 "nemo-theme.css", NULL);
+    css_file = g_file_new_for_path (css_path);
+
+    reload_smplos_theme ();
+
+    smplos_css_monitor = g_file_monitor_file (css_file,
+                                              G_FILE_MONITOR_NONE,
+                                              NULL, &error);
+    if (smplos_css_monitor != NULL) {
+        g_signal_connect (smplos_css_monitor, "changed",
+                          G_CALLBACK (on_smplos_theme_changed), NULL);
+    } else {
+        g_warning ("smplOS: could not watch nemo-theme.css: %s",
+                   error != NULL ? error->message : "unknown");
+        g_clear_error (&error);
+    }
+
+    g_object_unref (css_file);
+    g_free (css_path);
+}
+#endif /* SMPLOS */
+
+/* ------------------------------------------------------------------ */
 
 static void
 add_css_provider_at_priority (const gchar *rpath, guint priority)
@@ -319,6 +414,13 @@ init_icons_and_styles (void)
 
     add_css_provider_at_priority ("/org/nemo/nemo-style-application.css",
                                   GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+
+#ifdef SMPLOS
+    /* smplOS: load per-theme accent/color overrides at USER priority (800),
+     * above Adwaita and nemo's own CSS.  Also installs a GFileMonitor for
+     * live reload when theme-set rewrites the file. */
+    load_smplos_theme ();
+#endif /* SMPLOS */
 
     GtkSettings *gtk_settings = gtk_settings_get_default ();
     /* We create our own 'runtime theme' when we encounter one that doesn't
@@ -608,6 +710,10 @@ nemo_application_quit_mainloop (GApplication *app)
     save_accel_map (NULL);
     g_object_unref (NEMO_APPLICATION (app)->undo_manager);
     g_clear_object (&mandatory_css_provider);
+#ifdef SMPLOS
+    g_clear_object (&smplos_css_monitor);
+    g_clear_object (&smplos_css_provider);
+#endif /* SMPLOS */
 
     nemo_application_notify_unmount_done (NEMO_APPLICATION (app), NULL);
 

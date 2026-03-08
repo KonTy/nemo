@@ -1,7 +1,7 @@
 # Meson build file
 
 # https://github.com/linuxmint/nemo
-project('nemo', 'c', version : '1.0.5', meson_version : '>=0.56.0')
+project('nemo', 'c', version : '1.1.0', meson_version : '>=0.56.0')
 
 # 1. If the library code has changed at all since last release, then increment revision.
 # 2. If any interfaces have been added, then increment current and set revision to 0.
@@ -45,6 +45,7 @@ conf.set10('HAVE_MALLOPT', cc.has_function('mallopt', prefix: '#include <malloc.
 
 add_global_arguments([
     '-Werror=implicit-function-declaration',
+    '-DSMPLOS',  # smplOS-specific features; omit this line when contributing upstream
   ],
   language: 'c',
 )
