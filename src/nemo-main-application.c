@@ -539,6 +539,16 @@ nemo_main_application_open (GApplication *app,
 {
 	NemoMainApplication *self = NEMO_MAIN_APPLICATION (app);
 
+	/* --select <URI>: open parent dir with the file highlighted */
+	if (g_str_has_prefix (options, "SELECT=")) {
+		const gchar *sel_uri = options + strlen ("SELECT=");
+		GFile *sel_file = g_file_new_for_commandline_arg (sel_uri);
+		/* files[0] is the pre-computed parent passed by local_command_line */
+		nemo_application_open_location (NEMO_APPLICATION (app), files[0], sel_file, "", FALSE);
+		g_object_unref (sel_file);
+		return;
+	}
+
 	gboolean open_in_tabs = FALSE;
 	gchar *geometry = NULL;
 	gboolean open_in_existing_window = strcmp (options, "EXISTING_WINDOW") == 0;
@@ -668,6 +678,7 @@ nemo_main_application_local_command_line (GApplication *application,
 	gboolean fix_cache = FALSE;
     gboolean debug = FALSE;
 	gchar **remaining = NULL;
+	gchar *select_uri = NULL;
     GApplicationFlags init_flags;
 	NemoMainApplication *self = NEMO_MAIN_APPLICATION (application);
 
@@ -698,6 +709,8 @@ nemo_main_application_local_command_line (GApplication *application,
           "Enable debugging code.  Example usage: 'NEMO_DEBUG=Actions,Window nemo --debug'.  Use NEMO_DEBUG=help for more topics.", NULL },
 		{ "quit", 'q', 0, G_OPTION_ARG_NONE, &kill_shell, 
 		  N_("Quit Nemo."), NULL },
+		{ "select", 's', 0, G_OPTION_ARG_STRING, &select_uri,
+		  N_("Open the parent folder of URI and select/highlight that file."), N_("URI") },
 		{ G_OPTION_REMAINING, 0, 0, G_OPTION_ARG_STRING_ARRAY, &remaining, NULL,  N_("[URI...]") },
 
 		{ NULL }
@@ -837,6 +850,24 @@ post_registration:
 		files[0] = g_file_new_for_path (g_get_home_dir ());
 		files[1] = NULL;
 	}
+	/* --select: open the parent dir and highlight the requested file */
+	if (select_uri != NULL) {
+		GFile *sel_file = g_file_new_for_commandline_arg (select_uri);
+		GFile *parent   = g_file_get_parent (sel_file);
+		if (parent == NULL)
+			parent = g_object_ref (sel_file); /* root — select nothing */
+		GFile *sel_files[2] = { parent, NULL };
+		/* Encode the selection URI in the options field so the primary
+		 * instance can decode it even when we're just a launcher. */
+		gchar *concatOptions = g_strdup_printf ("SELECT=%s", select_uri);
+		g_application_open (application, sel_files, 1, concatOptions);
+		g_free (concatOptions);
+		g_object_unref (parent);
+		g_object_unref (sel_file);
+		g_free (select_uri);
+		goto out_free_files;
+	}
+
 	/* Invoke "Open" to open in existing window or create new windows */
 	if (len > 0) {
 		gchar* concatOptions = g_malloc0(64);
@@ -853,6 +884,7 @@ post_registration:
 		g_free (concatOptions);
 	}
 
+ out_free_files:
 	for (idx = 0; idx < len; idx++) {
 		g_object_unref (files[idx]);
 	}
