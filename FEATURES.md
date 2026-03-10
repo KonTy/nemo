@@ -1,7 +1,7 @@
 # smplos-nemo Features & Release Notes
 
-**Current Version:** v1.0.4  
-**Release Date:** March 7, 2026
+**Current Version:** v1.2.0  
+**Release Date:** March 9, 2026
 
 ---
 
@@ -133,6 +133,29 @@ These features were developed for smplos-nemo and are not expected to be accepte
   - Use-after-free crash fixes
   - Reason for smplos-only: Some upstream, some smplos-specific
 
+- **Verify After Copy/Move** (`release`)
+  - Checkbox in F5 (Copy) and F6 (Move) dialogs: "Verify after copy/move"
+  - SHA-256 checksum comparison of source and destination after each file
+  - Bypasses page cache with posix_fadvise(DONTNEED) for true on-disk verification
+  - fsync before verification to ensure data is flushed to disk
+  - Mismatch dialog with Cancel/Skip options
+  - Checkbox state persists across operations within a session
+  - Reason for smplos-only: Power-user feature inspired by Double Commander
+
+- **Per-Pane Location Labels** (`release`)
+  - Compact path label above each pane's file list in dual-pane mode
+  - Shows tilde-shortened paths (e.g. ~/Documents) or URIs for non-local locations
+  - Ellipsize from start so current folder name is always visible
+  - Auto-shows when split view is activated, auto-hides when closed
+  - Configurable via GSettings key `show-dual-pane-location-labels` (default: on)
+  - Preference checkbox under Views → Behavior
+  - Reason for smplos-only: Dual-pane enhancement not in upstream scope
+
+- **Command-Line Flags** (`release`)
+  - `--class` / `-c`: Set custom WM_CLASS at launch (e.g. for floating rules)
+  - `--select` / `-s`: Open parent directory and highlight a specific file
+  - Reason for smplos-only: Compositor integration features
+
 - **Archive Browsing** (`feature/archive-support`)
   - Double-click archives to browse contents like folders
   - Transparent FUSE-based mounting (fuse-zip, archivemount)
@@ -170,7 +193,18 @@ These features were developed for smplos-nemo and are not expected to be accepte
 ---
 
 ## Version History
+### smplos-nemo v1.2.0 (March 2026)
+- Verify after copy/move: SHA-256 verification checkbox in F5/F6 dialogs
+- Per-pane location labels: compact path display above each pane in dual-pane mode
+- New GSettings key: show-dual-pane-location-labels (default: true)
+- Preference checkbox under Views → Behavior
+- Debian build workflow fixed (added Mint repos + missing dependencies)
 
+### smplos-nemo v1.1.0 (March 2026)
+- `--class` / `-c` flag for custom WM_CLASS
+- `--select` / `-s` flag to highlight files
+- Live theming support for smplOS
+- Page cache bypass for USB copy performance
 ### smplos-nemo v1.0.2 (March 2026)
 - Archive browsing: Double-click ZIP/7z/TAR archives to browse contents
 - Archive creation: Right-click to compress files to tar.gz
@@ -214,5 +248,5 @@ We welcome efforts to contribute suitable features upstream:
 
 ---
 
-**Last Updated:** March 6, 2026  
+**Last Updated:** March 9, 2026  
 **Maintained by:** smplos Development Team
