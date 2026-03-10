@@ -2368,6 +2368,16 @@ nemo_window_split_view_on (NemoWindow *window)
 
 	window_set_search_action_text (window, FALSE);
 
+	/* Show per-pane location labels for all panes (if enabled in settings) */
+	if (g_settings_get_boolean (nemo_preferences, NEMO_PREFERENCES_SHOW_DUAL_PANE_LOCATION_LABELS)) {
+		GList *l;
+		for (l = window->details->panes; l != NULL; l = l->next) {
+			NemoWindowPane *p = l->data;
+			nemo_window_pane_set_location_label_visible (p, TRUE);
+			nemo_window_pane_sync_location_widgets (p);
+		}
+	}
+
 	nemo_window_update_show_hide_ui_elements (window);
 }
 
@@ -2400,6 +2410,9 @@ nemo_window_split_view_off (NemoWindow *window)
 	nemo_window_set_active_pane (window, active_pane);
 	nemo_navigation_state_set_master (window->details->nav_state,
 					      active_pane->action_group);
+
+	/* Hide per-pane location label on the remaining pane */
+	nemo_window_pane_set_location_label_visible (active_pane, FALSE);
 
 	nemo_window_update_show_hide_ui_elements (window);
 }

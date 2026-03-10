@@ -73,6 +73,9 @@ struct _NemoWindowPane {
 
 	gboolean show_location_entry;
 
+	/* per-pane location label (visible in split view) */
+	GtkWidget *pane_location_label;
+
 	/* notebook */
 	GtkWidget *notebook;
 
@@ -102,6 +105,7 @@ void nemo_window_pane_close_slot (NemoWindowPane *pane, NemoWindowSlot *slot);
 GtkActionGroup * nemo_window_pane_get_toolbar_action_group (NemoWindowPane   *pane);
 void nemo_window_pane_grab_focus (NemoWindowPane *pane);
 void nemo_window_pane_sync_up_actions (NemoWindowPane *pane);
+void nemo_window_pane_set_location_label_visible (NemoWindowPane *pane, gboolean visible);
 /* bars */
 void     nemo_window_pane_ensure_location_bar (NemoWindowPane *pane);
 

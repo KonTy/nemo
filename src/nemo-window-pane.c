@@ -979,6 +979,23 @@ nemo_window_pane_constructed (GObject *obj)
 	g_signal_connect_object (nemo_location_bar_get_entry (NEMO_LOCATION_BAR (pane->location_bar)), "focus-in-event",
 				 G_CALLBACK (toolbar_focus_in_callback), pane, 0);
 
+	/* per-pane location label (shown only in split view) */
+	pane->pane_location_label = gtk_label_new ("");
+	gtk_label_set_xalign (GTK_LABEL (pane->pane_location_label), 0.0);
+	gtk_label_set_ellipsize (GTK_LABEL (pane->pane_location_label), PANGO_ELLIPSIZE_START);
+	gtk_label_set_single_line_mode (GTK_LABEL (pane->pane_location_label), TRUE);
+	gtk_widget_set_margin_start (pane->pane_location_label, 6);
+	gtk_widget_set_margin_end (pane->pane_location_label, 6);
+	gtk_widget_set_margin_top (pane->pane_location_label, 2);
+	gtk_widget_set_margin_bottom (pane->pane_location_label, 2);
+
+	GtkStyleContext *label_ctx = gtk_widget_get_style_context (pane->pane_location_label);
+	gtk_style_context_add_class (label_ctx, "pane-location-label");
+
+	gtk_box_pack_start (GTK_BOX (pane), pane->pane_location_label, FALSE, FALSE, 0);
+	/* hidden by default; shown when split view is active */
+	gtk_widget_set_no_show_all (pane->pane_location_label, TRUE);
+
 	/* initialize the notebook */
 	pane->notebook = g_object_new (NEMO_TYPE_NOTEBOOK, NULL);
 	gtk_box_pack_start (GTK_BOX (pane), pane->notebook,
@@ -1174,6 +1191,33 @@ nemo_window_pane_sync_location_widgets (NemoWindowPane *pane)
 		nemo_location_bar_set_location (NEMO_LOCATION_BAR (pane->location_bar), uri);
 		g_free (uri);
 		nemo_path_bar_set_path (NEMO_PATH_BAR (pane->path_bar), slot->location);
+
+		/* Update per-pane location label */
+		if (pane->pane_location_label != NULL) {
+			char *path = g_file_get_path (slot->location);
+			if (path != NULL) {
+				const char *home = g_get_home_dir ();
+				if (g_str_has_prefix (path, home)) {
+					char *display = g_strconcat ("~", path + strlen (home), NULL);
+					char *markup = g_markup_printf_escaped ("<small><b>%s</b></small>", display);
+					gtk_label_set_markup (GTK_LABEL (pane->pane_location_label), markup);
+					g_free (display);
+					g_free (markup);
+				} else {
+					char *markup = g_markup_printf_escaped ("<small><b>%s</b></small>", path);
+					gtk_label_set_markup (GTK_LABEL (pane->pane_location_label), markup);
+					g_free (markup);
+				}
+				g_free (path);
+			} else {
+				/* URI-based location (e.g. trash:///, smb:///) */
+				char *uri_str = g_file_get_uri (slot->location);
+				char *markup = g_markup_printf_escaped ("<small><b>%s</b></small>", uri_str);
+				gtk_label_set_markup (GTK_LABEL (pane->pane_location_label), markup);
+				g_free (uri_str);
+				g_free (markup);
+			}
+		}
         restore_focus_widget (pane);
 
         action = gtk_action_group_get_action (pane->action_group, NEMO_ACTION_TOGGLE_LOCATION);
@@ -1295,6 +1339,18 @@ nemo_window_pane_grab_focus (NemoWindowPane *pane)
 {
 	if (NEMO_IS_WINDOW_PANE (pane) && pane->active_slot) {
 		nemo_view_grab_focus (pane->active_slot->content_view);
+	}
+}
+
+void
+nemo_window_pane_set_location_label_visible (NemoWindowPane *pane, gboolean visible)
+{
+	if (pane->pane_location_label != NULL) {
+		if (visible) {
+			gtk_widget_show (pane->pane_location_label);
+		} else {
+			gtk_widget_hide (pane->pane_location_label);
+		}
 	}
 }
 

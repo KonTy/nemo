@@ -352,6 +352,11 @@
       <summary>Whether to default to showing dual-pane view when a new window is opened</summary>
       <description>If set to true, new Nemo windows will default to showing two panes</description>
     </key>
+    <key name="show-dual-pane-location-labels" type="b">
+      <default>true</default>
+      <summary>Whether to show per-pane location labels in dual-pane mode</summary>
+      <description>If set to true, each pane in dual-pane mode will show a compact path label above its file list</description>
+    </key>
     <key name="ignore-view-metadata" type="b">
       <default>false</default>
       <summary>Whether to ignore folder metadata for view zoom levels and layouts</summary>
