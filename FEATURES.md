@@ -1,7 +1,7 @@
 # nemo-smpl — Features & Release Notes
 
-**Current Version:** v1.2.0  
-**Release Date:** March 9, 2026
+**Current Version:** v1.3.0  
+**Release Date:** March 10, 2026
 
 ---
 
@@ -111,8 +111,12 @@ Double Commander-style instant file viewer:
 
 ## Version History
 
-### v1.2.0 (March 2026)
+### v1.3.0 (March 2026)
 
+- Renamed project from smplos-nemo to **nemo-smpl** across all docs, CI, and source
+- Consolidated README.md and FEATURES.md — removed duplication, unified branding
+- Upstream linuxmint CI no longer runs on release branch (no more stale artifacts)
+- Cleaned up old GitHub releases (v1.0.x, preview-demo-assets)
 - **F3 Quick Preview**: instant file viewer (text, image, media, hex, directory analysis)
 - **Shared NemoDirAnalyzer widget**: directory-size Pareto analysis reused by Overview + F3
 - **Verify after copy/move**: SHA-256 checksum checkbox in F5/F6 dialogs
