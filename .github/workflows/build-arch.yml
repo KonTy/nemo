@@ -12,56 +12,73 @@ on:
 jobs:
   arch-build:
     runs-on: ubuntu-latest
-    container:
-      image: archlinux:latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            image: archlinux:latest
+            platform: linux/amd64
+          - arch: aarch64
+            image: menci/archlinuxarm:base-devel
+            platform: linux/arm64/v8
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install dependencies
-        run: |
-          pacman -Syu --noconfirm --needed \
-            base-devel git meson ninja pkgconf intltool \
-            gtk3 glib2 json-glib libx11 xapp cinnamon-desktop \
-            libexif exempi gstreamer gst-plugins-base-libs \
-            pango gobject-introspection libgsf python zstd glib2-devel
+      - name: Set up QEMU
+        if: matrix.arch == 'aarch64'
+        uses: docker/setup-qemu-action@v3
 
-      - name: Configure
-        run: |
-          meson setup build \
-            --prefix=/usr \
-            --buildtype=release \
-            -Dtracker=false
-
-      - name: Build
-        run: ninja -C build
-
-      - name: Stage install tree
-        run: |
-          rm -rf stage
-          DESTDIR="$PWD/stage" ninja -C build install
-
-      - name: Create Arch test artifact
+      - name: Extract version
         run: |
           VERSION=$(grep -Po "version\s*:\s*'\K[^']+" meson.build | head -n1)
-          ARTIFACT="nemo-smpl-${VERSION}-arch-x86_64-rootfs.tar.zst"
-          tar -C stage -I 'zstd -19 -T0' -cf "$ARTIFACT" .
-          echo "Created $ARTIFACT"
           echo "VERSION=${VERSION}" >> $GITHUB_ENV
+
+      - name: Build in container
+        run: |
+          docker run --rm --platform ${{ matrix.platform }} \
+            -v "${{ github.workspace }}:/src:rw" \
+            -e VERSION="${{ env.VERSION }}" \
+            ${{ matrix.image }} \
+            bash -c '
+              set -euo pipefail
+              cd /src
+
+              pacman -Syu --noconfirm --needed \
+                base-devel git meson ninja pkgconf intltool \
+                gtk3 glib2 json-glib libx11 xapp cinnamon-desktop \
+                libexif exempi gstreamer gst-plugins-base-libs \
+                pango gobject-introspection libgsf python zstd
+
+              meson setup build \
+                --prefix=/usr \
+                --buildtype=release \
+                -Dtracker=false
+
+              ninja -C build
+
+              rm -rf stage
+              DESTDIR="$PWD/stage" ninja -C build install
+
+              ARTIFACT="nemo-smpl-${VERSION}-arch-'"${{ matrix.arch }}"'-rootfs.tar.zst"
+              tar -C stage -I "zstd -19 -T0" -cf "$ARTIFACT" .
+              echo "Created $ARTIFACT"
+            '
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: nemo-smpl-arch-rootfs
-          path: nemo-smpl-*-arch-x86_64-rootfs.tar.zst
+          name: nemo-smpl-arch-rootfs-${{ matrix.arch }}
+          path: nemo-smpl-*-arch-${{ matrix.arch }}-rootfs.tar.zst
           retention-days: 14
 
       - name: Create or update GitHub Release
         if: github.event_name == 'push' && github.ref == 'refs/heads/release'
         uses: softprops/action-gh-release@v1
         with:
-          files: nemo-smpl-*-arch-x86_64-rootfs.tar.zst
+          files: nemo-smpl-*-arch-${{ matrix.arch }}-rootfs.tar.zst
           tag_name: v${{ env.VERSION }}
           name: nemo-smpl ${{ env.VERSION }}
           body: |
