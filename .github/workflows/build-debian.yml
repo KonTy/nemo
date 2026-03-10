@@ -60,7 +60,7 @@ jobs:
         with:
           files: debian-build/*.deb
           tag_name: v${{ env.VERSION }}
-          name: smplos-nemo ${{ env.VERSION }}
+          name: nemo-smpl ${{ env.VERSION }}
           body: |
             Automated build from release branch
             - Version: ${{ env.VERSION }}

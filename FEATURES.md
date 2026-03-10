@@ -1,278 +1,143 @@
-# smplos-nemo Features & Release Notes
+# nemo-smpl — Features & Release Notes
 
 **Current Version:** v1.2.0  
 **Release Date:** March 9, 2026
 
 ---
 
-## v1.0.3 Release Highlights — MTP Support Hardened
-
-This release makes Android phone/tablet file transfer **production-ready** with zero configuration needed.
-
-### 🎯 Major Fixes in v1.0.3
-
-#### ✅ MTP Device Support — Fully Fixed
-
-**Problem Solved:**
-- Users experienced "Unable to open MTP device" errors when connecting Android phones
-- gphoto2 and KDE kiod6 daemons would claim USB devices exclusively, blocking MTP access
-- Manual udev rule editing was required to fix device conflicts
-
-**Solution Implemented:**
-- **Automatic Udev Rules** — `70-disable-gphoto-for-mtp.rules` bundled in package
-- **Device Coverage** — Samsung, Google Pixel, HTC, LG, Sony, Motorola built-in
-- **Retry Logic** — Automatic 2x retry on transient USB "device busy" errors
-- **Clear Errors** — User sees "Phone locked?", "Driver missing?", or "Device busy" with hints
-- **Zero Setup** — Rules deployed automatically on package install, no manual configuration
-
-**Tested & Verified:**
-- Samsung Galaxy S21 Ultra ✅
-- Google Pixel 6 ✅  
-- LG V60 ✅
-- Generic Android devices ✅
-
-#### ✅ Enhanced Error Handling
-
-**New MTP Error Messages:**
-```
-Mount failed: "Device is locked"
-→ Hint: Unlock your phone and try again
-
-Mount failed: "Unable to open MTP device" 
-→ Hint: Install libmtp package: pacman -S libmtp
-
-Mount failed: "Device busy - retrying..."
-→ Auto-retrying up to 2 times, then gives up with clear feedback
-```
-
-### 📦 Installation Improvements
-
-- **Arch Linux/AUR**: `yay -S nemo-smpl` (post-install hooks handle udev reload)
-- **Debian/Ubuntu**: .deb packages with automatic dependency resolution
-- **Source builds**: Meson installs rules to `/lib/udev/rules.d` automatically
-
----
-
 ## Feature Tracking
 
-This document tracks which features in smplos-nemo are upstream and which are smplos-exclusive.
+This document tracks which features in nemo-smpl are upstream and which are exclusive.
 
-## Upstream (Merged into linuxmint/nemo)
+### Upstream (Merged into linuxmint/nemo)
 
-None yet. We're working on contributing suitable features upstream.
+None yet — we're working on contributing suitable features upstream.
 
-## Pending Upstream
+### Pending Upstream
 
 These features are candidates for upstream contribution:
 
-- [ ] **MTP Device Support** — Better phone/tablet device detection and mounting with user-friendly hints
-  - Status: Fixed & hardened in v1.0.3, ready for PR
-  - Link: `src/nemo-places-sidebar.c`, `libnemo-private/nemo-file-operations.c`, `data/70-disable-gphoto-for-mtp.rules`
-  
-- [ ] **Preview Pane Improvements** — Enhanced image/video preview and EXIF support
-  - Status: Evaluating upstream compatibility
-  - Link: `src/nemo-preview-pane.*`
+- [ ] **Page Cache Throttle** — PR [#3726](https://github.com/linuxmint/nemo/pull/3726)
+- [ ] **Configurable Keybindings** — PR [#3722](https://github.com/linuxmint/nemo/pull/3722)
+- [ ] **Substring Search** — PR [#3718](https://github.com/linuxmint/nemo/pull/3718)
 
-## smplos-Exclusive Features
+---
 
-These features were developed for smplos-nemo and are not expected to be accepted upstream.
+## nemo-smpl Exclusive Features
 
-### ✅ Implemented & Stable
+These features are developed for nemo-smpl and are not expected to be accepted upstream.
 
-- **Preview Pane** (`feature/preview-pane`)
-  - Live image/video preview
-  - GPS map display for geotagged photos (OpenStreetMap)
-  - EXIF metadata display
-  - Adjustable preview width
-  - Toggle metadata panel
-  - Reason for smplos-only: Upstream considers it out-of-scope / preference for keeping core minimal
+### F3 Quick Preview
 
-- **Disk Usage Overview** (`feature/mtp-and-overview-improvements`)
-  - Interactive Pareto charts for each volume
-  - Deep directory scan with top offenders list
-  - Side-by-side layout (chart + list)
-  - Bookmark/anchor system for volume navigation
-  - Background cache with periodic refresh
-  - Reason for smplos-only: Upstream rejected as too niche / doesn't fit core mission
+Double Commander-style instant file viewer:
 
-- **MTP Device Support Enhancements** (`feature/mtp-and-overview-improvements`)
-  - Better detection and mounting hints
-  - "Unlock phone" / "Select File Transfer" guidance
-  - Missing gvfs-mtp backend detection with install hints
-  - Distribution-aware backend path detection (Arch vs Debian)
-  - Reason for smplos-only: Upstream prefers minimal; we've enhanced GVFS integration
+- Text, image (including animated GIFs), audio/video (GStreamer), and hex dump modes
+- Directory analysis: F3 on a folder shows Pareto bar chart + ranked biggest-files list
+- Paged text/hex viewer using `pread()` + LRU cache — handles multi-GB files with ~512 KB resident
+- Escape to dismiss; singleton window reused across invocations
+- Split view moved to Ctrl+F3
+- Modular architecture: `NemoImageViewer`, `NemoPagedViewer`, `NemoPreviewUtils` shared between sidebar pane and quick preview
 
-- **Configurable Keyboard Shortcuts** (`feature/configurable-keybindings`)
-  - Edit all keyboard shortcuts via preferences
-  - Save custom keybindings
-  - Reason for smplos-only: Upstream prefers fixed keybindings
+### Shared Directory Analyzer Widget
 
-- **Substring Search** (`feature/substring-search`)
-  - Find files matching anywhere in filename (not just start)
-  - Interactive search as you type
-  - Reason for smplos-only: Upstream considers it non-standard behavior
+- Reusable `NemoDirAnalyzer` widget for directory-size Pareto analysis
+- Used by both the Overview page (per-volume) and F3 Quick Preview (per-folder)
+- Vertical bar chart + ranked list with clickable paths
+- Background async scan with `"scan-finished"` signal
 
-- **Tab-based Pane Splitting** (`feature/tab-split-pane`)
-  - Press Tab to switch focus between left/right panes
-  - Ctrl+N to open new split pane
-  - Reason for smplos-only: Upstream doesn't support split panes
+### Verify After Copy/Move
 
-- **Copy Path Feature** (`feature/copy-path`)
-  - Right-click "Copy Path" option
-  - Quickly copy full file paths to clipboard
-  - Reason for smplos-only: Minor feature but useful for power users
+- Checkbox in F5 (Copy) and F6 (Move) dialogs: "Verify after copy/move"
+- SHA-256 checksum comparison of source and destination after each file
+- Bypasses page cache with `posix_fadvise(DONTNEED)` for true on-disk verification
+- `fsync` before verification to ensure data is flushed to disk
+- Mismatch dialog with Cancel/Skip options
 
-- **Sidebar Context Menus** (part of core improvements)
-  - Right-click on sidebar items for actions
-  - F4 / Insert keybindings
-  - Reason for smplos-only: Not in upstream scope
+### Per-Pane Location Labels
 
-- **Performance Fixes** (part of core improvements)
-  - USB copy throttling fixes
-  - Memory leak corrections
-  - Use-after-free crash fixes
-  - Reason for smplos-only: Some upstream, some smplos-specific
+- Compact path label above each pane in dual-pane mode
+- Tilde-shortened paths (e.g. `~/Documents`) or URIs for non-local locations
+- Configurable via GSettings key `show-dual-pane-location-labels` (default: on)
+- Preference checkbox under Views → Behavior
 
-- **Verify After Copy/Move** (`release`)
-  - Checkbox in F5 (Copy) and F6 (Move) dialogs: "Verify after copy/move"
-  - SHA-256 checksum comparison of source and destination after each file
-  - Bypasses page cache with posix_fadvise(DONTNEED) for true on-disk verification
-  - fsync before verification to ensure data is flushed to disk
-  - Mismatch dialog with Cancel/Skip options
-  - Checkbox state persists across operations within a session
-  - Reason for smplos-only: Power-user feature inspired by Double Commander
+### Preview Pane (Alt+F3)
 
-- **Per-Pane Location Labels** (`release`)
-  - Compact path label above each pane's file list in dual-pane mode
-  - Shows tilde-shortened paths (e.g. ~/Documents) or URIs for non-local locations
-  - Ellipsize from start so current folder name is always visible
-  - Auto-shows when split view is activated, auto-hides when closed
-  - Configurable via GSettings key `show-dual-pane-location-labels` (default: on)
-  - Preference checkbox under Views → Behavior
-  - Reason for smplos-only: Dual-pane enhancement not in upstream scope
+- Live image/video preview with EXIF metadata display
+- GPS map display for geotagged photos (OpenStreetMap)
+- Adjustable preview width (Ctrl+[ / Ctrl+])
 
-- **Command-Line Flags** (`release`)
-  - `--class` / `-c`: Set custom WM_CLASS at launch (e.g. for floating rules)
-  - `--select` / `-s`: Open parent directory and highlight a specific file
-  - Reason for smplos-only: Compositor integration features
+### Disk Usage Overview
 
-- **F3 Quick Preview** (`release`)
-  - Double Commander-style F3 instant file viewer
-  - Supports text, images (including animated GIFs), audio/video (GStreamer), and hex dump
-  - Directory analysis: F3 on a folder shows Pareto bar chart + ranked biggest-files list
-  - Paged text/hex viewer using pread() + LRU cache (handles multi-GB files with ~512 KB resident)
-  - Escape to dismiss, focus returns to Nemo
-  - Singleton window reused across invocations
-  - Split view moved to Ctrl+F3
-  - Modular architecture: NemoImageViewer, NemoPagedViewer, NemoPreviewUtils shared between sidebar pane and quick preview
-  - Reason for smplos-only: Power-user feature inspired by Double Commander / Midnight Commander
+- Interactive Pareto charts for each mounted volume
+- Deep directory scan with top offenders list
+- Side-by-side layout (chart + list) with bookmark/anchor navigation
+- Background cache with periodic refresh
 
-- **Shared Directory Analyzer Widget** (`release`)
-  - Reusable NemoDirAnalyzer widget for directory-size Pareto analysis
-  - Used by both the Overview page (per-volume) and F3 Quick Preview (per-folder)
-  - Vertical bar chart + ranked list with clickable paths for navigation
-  - Background async scan with "scan-finished" signal
-  - Shared colour palette and scan engine extracted from Overview
-  - Reason for smplos-only: Extension of the overview page feature
+### smplOS Live Theming
 
-- **Archive Browsing** (`feature/archive-support`)
-  - Double-click archives to browse contents like folders
-  - Transparent FUSE-based mounting (fuse-zip, archivemount)
-  - Supports ZIP, 7z, TAR, TAR.GZ, TAR.BZ2, TAR.XZ, RAR
-  - Mount points in `/run/user/$UID/nemo-archives/`
-  - Automatic cleanup when no longer accessed
-  - Reason for smplos-only: Requires external FUSE tools
+- Accent colors, backgrounds, and selection highlights update instantly via `theme-set`
+- `GFileMonitor` watches `~/.config/smplos/nemo-theme.css` for live CSS reload
+- All 15 smplOS themes ship pre-baked `nemo.css` files
+- Compiled under `#ifdef SMPLOS` — upstream patches contain none of this code
 
-- **Archive Creation** (`feature/archive-support`)
-  - Right-click context menu "Compress to Archive"
-  - Creates .tar.gz archives with interactive filename dialog
-  - Real progress feedback via `pv` with zenity dialogs
-  - Single or multiple file/folder selection
-  - Reason for smplos-only: Integration with specific compression tools
+### Archive Support
 
-- **Archive Browsing** (`feature/archive-support`)
-  - Double-click archives to browse contents like folders
-  - Transparent FUSE-based mounting (fuse-zip, archivemount)
-  - Supports ZIP, 7z, TAR, TAR.GZ, TAR.BZ2, TAR.XZ, RAR
-  - Mount points in `/run/user/$UID/nemo-archives/`
-  - Automatic cleanup when no longer accessed
-  - Reason for smplos-only: Requires external FUSE tools
+- **Browsing**: Double-click ZIP/7z/TAR archives to browse contents via FUSE
+- **Creation**: Right-click "Compress to Archive" with progress feedback
+- Supports ZIP, 7z, TAR, TAR.GZ, TAR.BZ2, TAR.XZ, RAR
 
-- **Archive Creation** (`feature/archive-support`)
-  - Right-click context menu "Compress to 7z Archive"
-  - Maximum compression with interactive filename dialog
-  - Progress feedback with zenity dialogs
-  - Single or multiple file/folder selection
-  - Reason for smplos-only: Integration with specific compression tools
+### MTP Device Support
 
-### 🚧 In Development
+- Automatic udev rules prevent gphoto2 conflicts
+- Retry logic for transient USB "device busy" errors
+- Clear error messages: "Phone locked?", "Driver missing?", "Device busy"
+- Covers Samsung, Google Pixel, HTC, LG, Sony, Motorola
 
-(None currently)
+### Command-Line Flags
+
+- `--class` / `-c`: Set custom WM_CLASS at launch (for compositor floating rules)
+- `--select` / `-s`: Open parent directory and highlight a specific file
+
+### Other Enhancements
+
+- **Configurable Keyboard Shortcuts** — edit all keybindings via preferences
+- **Substring Search** — match anywhere in filename, not just prefix
+- **Tab-based Pane Splitting** — Tab to switch focus, Ctrl+N for new split pane
+- **Copy Path** — right-click "Copy Path" to clipboard
+- **Cover Art Directory Icons** — directories with `cover.jpg`/`cover.png` use them as folder icons
+- **Performance Fixes** — USB copy throttling, memory leak corrections, use-after-free crash fixes
 
 ---
 
 ## Version History
-### smplos-nemo v1.2.0 (March 2026)
-- **F3 Quick Preview**: Double Commander-style instant file viewer (text, image, media, hex, directory)
-  - Paged text/hex viewer with pread() + LRU cache — handles multi-GB files
-  - Directory analysis with Pareto bar chart + ranked biggest-files list
-  - Modular architecture: NemoImageViewer, NemoPagedViewer, NemoPreviewUtils
-- **Shared NemoDirAnalyzer widget** for directory-size analysis (used by Overview + F3)
-  - Overview page refactored — ~350 lines of duplicated code removed
+
+### v1.2.0 (March 2026)
+
+- **F3 Quick Preview**: instant file viewer (text, image, media, hex, directory analysis)
+- **Shared NemoDirAnalyzer widget**: directory-size Pareto analysis reused by Overview + F3
+- **Verify after copy/move**: SHA-256 checksum checkbox in F5/F6 dialogs
+- **Per-pane location labels**: compact path display above each pane in dual-pane mode
+- **Cover art directory icons**: cherry-picked from upstream PR #3728
 - **Keybinding changes**: F3 → Quick Preview, Ctrl+F3 → Split View
-- Verify after copy/move: SHA-256 verification checkbox in F5/F6 dialogs
-- Per-pane location labels: compact path display above each pane in dual-pane mode
-- New GSettings key: show-dual-pane-location-labels (default: true)
-- Preference checkbox under Views → Behavior
-- Debian build workflow fixed (added Mint repos + missing dependencies)
-
-### smplos-nemo v1.1.0 (March 2026)
-- `--class` / `-c` flag for custom WM_CLASS
-- `--select` / `-s` flag to highlight files
-- Live theming support for smplOS
-- Page cache bypass for USB copy performance
-### smplos-nemo v1.0.2 (March 2026)
-- Archive browsing: Double-click ZIP/7z/TAR archives to browse contents
-- Archive creation: Right-click to compress files to tar.gz
-- Dependencies: fuse-zip, archivemount, pv, gzip, zenity
-
-### smplos-nemo v1.0.2 (March 2026)
-- Archive browsing: Double-click ZIP/7z/TAR archives to browse contents
-- Archive creation: Right-click to compress files to 7z
-- Dependencies: fuse-zip, archivemount, p7zip, zenity
-
-### smplos-nemo v1.0.1 (March 2026)
-- MTP support fully functional
-- Overview page with side-by-side layout
-- Preview pane with GPS mapping
-- CI updated to build on `release` and publish downloadable artifacts
-- About dialog branding updated to `smplos-nemo`
-
-### smplos-nemo v1.0.0 (March 2026)
-- Initial smplos fork with all above features integrated
+- Modular preview architecture: NemoImageViewer, NemoPagedViewer, NemoPreviewUtils
+- Overview page refactored — ~350 lines of duplicated scan code removed
+- Debian CI build fixed (LMDE 7 image)
 
 ---
 
 ## Contributing
 
-### For Feature Requests
-If you'd like to request a new feature for smplos-nemo, please [open an issue](https://github.com/KonTy/nemo/issues).
+### Feature Requests
 
-### For Developers
-To create a new feature:
+[Open an issue](https://github.com/KonTy/nemo/issues) on the nemo-smpl repository.
+
+### Development
+
 1. Create a feature branch: `git checkout -b feature/my-feature`
 2. Implement and test locally
-3. Create a PR against `release` branch
-4. If suitable for upstream, we'll cherry-pick to an upstream PR branch
-
-### Upstream Contribution
-We welcome efforts to contribute suitable features upstream:
-1. Extract the core logic from the smplos implementation
-2. Remove smplos-specific UI/branding
-3. Create a clean PR to [linuxmint/nemo](https://github.com/linuxmint/nemo)
-4. If accepted upstream, we rebase our feature branch and merge the upstream version
+3. Create a PR against the `release` branch
+4. If suitable for upstream, we'll prepare a clean PR to [linuxmint/nemo](https://github.com/linuxmint/nemo)
 
 ---
 
-**Last Updated:** March 9, 2026  
-**Maintained by:** smplos Development Team
+**Maintained by:** smplOS Development Team
