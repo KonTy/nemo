@@ -13,7 +13,9 @@ jobs:
   debian-build:
     runs-on: ubuntu-latest
     container:
-      image: debian:bookworm
+      # LMDE 7 (Debian-based) — has Linux Mint repos pre-configured,
+      # so all Cinnamon/xapp/nemo build-deps are available out of the box.
+      image: linuxmintd/lmde7-amd64
 
     steps:
       - name: Checkout
@@ -23,18 +25,8 @@ jobs:
         run: |
           apt-get update -qq
           apt-get install -y --no-install-recommends \
-            curl gnupg ca-certificates
-
-          # Add Linux Mint repo for Cinnamon-specific packages
-          echo "deb http://packages.linuxmint.com faye main" \
-            > /etc/apt/sources.list.d/mint.list
-          curl -fsSL https://linuxmint.github.io/keys/linuxmint-keyring.gpg \
-            > /etc/apt/trusted.gpg.d/linuxmint-keyring.gpg
-          apt-get update -qq
-
-          apt-get install -y --no-install-recommends \
-            build-essential devscripts debhelper-compat dh-python \
-            git meson ninja-build pkgconf intltool itstool \
+            build-essential devscripts debhelper dh-python equivs \
+            meson ninja-build pkgconf intltool itstool \
             libgtk-3-dev libglib2.0-dev libjson-glib-dev \
             libx11-dev libxapp-dev libcinnamon-desktop-dev \
             libexif-dev libexempi-dev libgstreamer1.0-dev \
@@ -43,19 +35,15 @@ jobs:
             gtk-doc-tools cinnamon-l10n libgtk-layer-shell-dev \
             libpango1.0-dev libatk1.0-dev libgail-3-dev \
             libxext-dev libxrender-dev libwayland-dev \
-            python3 python3-gi x11proto-core-dev \
-            libglib2.0-doc libgtk-3-doc
+            python3 python3-gi x11proto-dev
 
       - name: Build Debian package
         run: |
-          # Extract version
           VERSION=$(grep -Po "version\s*:\s*'\K[^']+" meson.build | head -n1)
           echo "VERSION=${VERSION}" >> $GITHUB_ENV
-          
-          # Build directly in source tree
+
           dpkg-buildpackage -us -uc -b
-          
-          # Move debs to a results directory
+
           mkdir -p debian-build
           mv ../*.deb debian-build/ || true
 
@@ -76,7 +64,7 @@ jobs:
           body: |
             Automated build from release branch
             - Version: ${{ env.VERSION }}
-            - Built from: release branch (Debian bookworm)
+            - Built from: release branch (LMDE 7)
             - Contains all latest features and fixes
           draft: false
           prerelease: false
