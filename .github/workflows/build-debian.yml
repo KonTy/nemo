@@ -44,8 +44,11 @@ jobs:
 
           dpkg-buildpackage -us -uc -b
 
+          # Only keep the packages users actually need to install.
+          # Skip -dev, -dbg, gir, and lib split packages.
           mkdir -p debian-build
-          mv ../*.deb debian-build/ || true
+          cp ../nemo_*.deb    debian-build/ || true
+          cp ../nemo-data_*.deb debian-build/ || true
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
