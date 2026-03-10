@@ -44,6 +44,7 @@
 #include "nemo-icon-view.h"
 #include "nemo-list-view.h"
 #include "nemo-toolbar.h"
+#include "nemo-quick-preview.h"
 
 #include <gtk/gtk.h>
 #include <gio/gio.h>
@@ -730,6 +731,45 @@ action_preview_pane_shrink_callback (GtkAction *action,
 	}
 
 	nemo_window_preview_pane_resize (NEMO_WINDOW (user_data), -50);
+}
+
+static void
+action_quick_preview_callback (GtkAction *action,
+                               gpointer user_data)
+{
+	NemoWindow *window;
+	NemoWindowSlot *slot;
+	NemoView *view;
+	GList *selection;
+	NemoFile *file;
+	GFile *location;
+	NemoQuickPreview *preview;
+
+	if (NEMO_IS_DESKTOP_WINDOW (user_data))
+		return;
+
+	window = NEMO_WINDOW (user_data);
+	slot = nemo_window_get_active_slot (window);
+	if (slot == NULL)
+		return;
+
+	view = nemo_window_slot_get_current_view (slot);
+	if (view == NULL)
+		return;
+
+	selection = nemo_view_get_selection (view);
+	if (selection == NULL)
+		return;
+
+	/* Preview the first selected file */
+	file = NEMO_FILE (selection->data);
+	location = nemo_file_get_location (file);
+
+	preview = nemo_quick_preview_get_instance ();
+	nemo_quick_preview_show_file (preview, location, GTK_WINDOW (window));
+
+	g_object_unref (location);
+	nemo_file_list_free (selection);
 }
 
 static void
@@ -2161,6 +2201,9 @@ static const GtkActionEntry main_entries[] = {
   /* name, stock id, label */  { "SplitViewSameLocation", NULL, N_("Sa_me Location as Other Pane"),
 				 "<alt>S", N_("Go to the same location as in the extra pane"),
 				 G_CALLBACK (action_split_view_same_location_callback) },
+  /* name, stock id, label */  { NEMO_ACTION_QUICK_PREVIEW, NULL, N_("Quick _Preview"),
+                                 "F3", N_("Preview the selected file"),
+                                 G_CALLBACK (action_quick_preview_callback) },
   /* name, stock id, label */  { "Add Bookmark", "xsi-bookmark-new-symbolic", N_("_Add Bookmark"),
                                  "<control>d", N_("Add a bookmark for the current location to this menu"),
                                  G_CALLBACK (action_add_bookmark_callback) },
@@ -2221,7 +2264,7 @@ static const GtkToggleActionEntry main_toggle_entries[] = {
 			     NULL,
   /* is_active */            FALSE },
   /* name, stock id */     { NEMO_ACTION_SHOW_HIDE_EXTRA_PANE, NULL,
-  /* label, accelerator */   N_("E_xtra Pane"), "F3",
+  /* label, accelerator */   N_("E_xtra Pane"), "<control>F3",
   /* tooltip */              N_("Open an extra folder view side-by-side"),
                              G_CALLBACK (action_split_view_callback),
   /* is_active */            FALSE },

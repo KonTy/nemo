@@ -57,7 +57,8 @@ const NemoKeybindingEntry nemo_keybinding_entries[] = {
 	{ "close-all-windows",     "<Actions>/ShellActions/Close All Windows",  N_("Close All Windows"),          N_("Window"), "<Control>q",                NULL, NULL },
 	{ "show-hidden-files",     "<Actions>/ShellActions/Show Hidden Files",  N_("Show Hidden Files"),          N_("Window"), "<Control>h",                NULL, NULL },
 	{ "show-sidebar",          "<Actions>/ShellActions/Show Hide Sidebar",  N_("Toggle Sidebar"),             N_("Window"), "F9",                        NULL, NULL },
-	{ "split-view",            "<Actions>/ShellActions/Show Hide Extra Pane", N_("Toggle Split View"),        N_("Window"), "F3",                        NULL, NULL },
+	{ "split-view",            "<Actions>/ShellActions/Show Hide Extra Pane", N_("Toggle Split View"),        N_("Window"), "<Control>F3",                   NULL, NULL },
+	{ "quick-preview",         "<Actions>/ShellActions/Quick Preview", N_("Quick File Preview"),        N_("Window"), "F3",                        NULL, NULL },
 	{ "switch-pane",           "<Actions>/ShellActions/SplitViewNextPane",  N_("Switch to Other Pane"),       N_("Window"), "F6",                        NULL, NULL },
 	{ "same-location-pane",    "<Actions>/ShellActions/SplitViewSameLocation", N_("Same Location as Other Pane"), N_("Window"), "<Alt>s",                NULL, NULL },
 

@@ -21,10 +21,10 @@
 #include <stdarg.h>
 #include <string.h>
 #include <sys/stat.h>
-#include <dirent.h>
 
 #include "nemo-window-slot.h"
 #include "nemo-window.h"
+#include "nemo-dir-analyzer.h"
 
 /* ── Donut layout ──────────────────────────────────────────────── */
 #define DONUT_SIZE         110
@@ -32,33 +32,10 @@
 #define CARD_PADDING        10
 #define LABEL_GAP            6
 
-/* ── Vertical-bar Pareto layout ────────────────────────────────── */
-#define VBAR_W              28   /* width of each bar              */
-#define VBAR_GAP             6   /* gap between bars               */
-#define VBAR_MAX_H         130   /* max bar height (tallest bar)   */
-#define VBAR_LABEL_H        65   /* label area below bars          */
-#define VBAR_SIZE_H         18   /* size-text area above bars      */
-#define VBAR_TOTAL_H       (VBAR_SIZE_H + VBAR_MAX_H + VBAR_LABEL_H)
-#define VBAR_MAX_BARS       10   /* max bars per chart             */
-#define TOP_OFFENDERS_MAX   10   /* deep-scan ranked entries       */
+/* ── Scan budgets & cache ───────────────────────────────────────── */
 #define CACHE_RESCAN_SECS  120   /* background cache refresh period */
 #define SCAN_TIME_BUDGET_MS_UI     12000 /* per-volume interactive budget */
 #define SCAN_TIME_BUDGET_MS_CACHE   8000 /* per-volume cache refresh budget */
-
-/* ── Colours ───────────────────────────────────────────────────── */
-typedef struct { double r, g, b; } Rgb;
-
-static const Rgb used_colours[] = {
-	{ 0.33, 0.63, 0.91 },  /* blue    */
-	{ 0.42, 0.78, 0.44 },  /* green   */
-	{ 0.94, 0.60, 0.22 },  /* orange  */
-	{ 0.84, 0.36, 0.36 },  /* red     */
-	{ 0.62, 0.42, 0.82 },  /* purple  */
-	{ 0.24, 0.79, 0.76 },  /* teal    */
-};
-#define N_COLOURS G_N_ELEMENTS (used_colours)
-
-static const Rgb free_colour = { 0.75, 0.75, 0.75 };
 
 /* ── Per-volume data ───────────────────────────────────────────── */
 typedef struct {
@@ -72,19 +49,6 @@ typedef struct {
 	double   fraction;
 	int      colour_idx;
 } VolumeInfo;
-
-/* ── Per-directory size entry (for Pareto charts) ──────────────── */
-typedef struct {
-	char    *name;       /* display name, e.g. "home" or "home/user" */
-	char    *full_path;  /* absolute path for navigation             */
-	guint64  size;
-} DirSizeEntry;
-
-/* ── Data attached to each Pareto drawing area ─────────────────── */
-typedef struct {
-	int     colour_idx;
-	GArray *entries;        /* DirSizeEntry, sorted desc by size */
-} ParetoDrawData;
 
 /* ── Scan result pushed from bg thread via g_idle_add ──────────── */
 typedef struct {
@@ -195,23 +159,6 @@ volume_info_clear (VolumeInfo *v)
 }
 
 static void
-dir_size_entry_clear (DirSizeEntry *e)
-{
-	g_free (e->name);
-	g_free (e->full_path);
-}
-
-static void
-pareto_draw_data_free (gpointer data)
-{
-	ParetoDrawData *pd = data;
-	if (pd == NULL) return;
-	if (pd->entries)
-		g_array_unref (pd->entries);
-	g_free (pd);
-}
-
-static void
 scan_result_free (ScanResult *sr)
 {
 	if (sr == NULL) return;
@@ -270,30 +217,6 @@ scan_thread_data_free (ScanThreadData *td)
 	g_free (td);
 }
 
-static GArray *
-dup_entries_array (GArray *src)
-{
-	GArray *dst;
-	guint i;
-
-	if (src == NULL)
-		return NULL;
-
-	dst = g_array_new (FALSE, TRUE, sizeof (DirSizeEntry));
-	g_array_set_clear_func (dst, (GDestroyNotify) dir_size_entry_clear);
-
-	for (i = 0; i < src->len; i++) {
-		DirSizeEntry *s = &g_array_index (src, DirSizeEntry, i);
-		DirSizeEntry d = { 0 };
-		d.name = g_strdup (s->name);
-		d.full_path = g_strdup (s->full_path);
-		d.size = s->size;
-		g_array_append_val (dst, d);
-	}
-
-	return dst;
-}
-
 static void
 cached_volume_result_free (CachedVolumeResult *cv)
 {
@@ -346,7 +269,7 @@ scan_cache_lookup_copy (const char *mount_path, ScanResult *sr)
 	g_mutex_lock (&g_scan_cache_lock);
 	cv = g_scan_cache != NULL ? g_hash_table_lookup (g_scan_cache, mount_path) : NULL;
 	if (cv != NULL && cv->deep != NULL && cv->deep->len > 0) {
-		sr->deep = dup_entries_array (cv->deep);
+		sr->deep = nemo_dir_entry_array_dup (cv->deep);
 		ok = (sr->deep != NULL && sr->deep->len > 0);
 	}
 	g_mutex_unlock (&g_scan_cache_lock);
@@ -371,160 +294,12 @@ scan_cache_store (const char *volume_name,
 	cv->volume_name = g_strdup (volume_name != NULL ? volume_name : mount_path);
 	cv->mount_path = g_strdup (mount_path);
 	cv->colour_idx = colour_idx;
-	cv->deep = dup_entries_array (deep);
+	cv->deep = nemo_dir_entry_array_dup (deep);
 	cv->updated_msec = g_get_monotonic_time () / 1000;
 
 	g_mutex_lock (&g_scan_cache_lock);
 	g_hash_table_replace (g_scan_cache, g_strdup (mount_path), cv);
 	g_mutex_unlock (&g_scan_cache_lock);
-}
-
-/* ── Deep scan helpers (background thread) ─────────────────────── */
-
-static void
-consider_top_offender (GArray *top,
-                       const char *mount_path,
-                       const char *full_path,
-                       guint64 size)
-{
-	DirSizeEntry candidate = { 0 };
-	guint i;
-	const char *rel;
-
-	if (size == 0 || top == NULL || full_path == NULL)
-		return;
-
-	candidate.full_path = g_strdup (full_path);
-	if (g_strcmp0 (full_path, mount_path) == 0) {
-		candidate.name = g_strdup (".");
-	} else if (g_str_has_prefix (full_path, mount_path)) {
-		rel = full_path + strlen (mount_path);
-		while (*rel == '/')
-			rel++;
-		candidate.name = g_strdup_printf ("./%s", rel);
-	} else {
-		candidate.name = g_path_get_basename (full_path);
-	}
-	candidate.size = size;
-
-	for (i = 0; i < top->len; i++) {
-		DirSizeEntry *e = &g_array_index (top, DirSizeEntry, i);
-		if (candidate.size > e->size)
-			break;
-	}
-
-	if (i >= TOP_OFFENDERS_MAX) {
-		dir_size_entry_clear (&candidate);
-		return;
-	}
-
-	if (top->len < TOP_OFFENDERS_MAX) {
-		g_array_append_val (top, candidate);
-	} else {
-		DirSizeEntry *last = &g_array_index (top, DirSizeEntry, top->len - 1);
-		dir_size_entry_clear (last);
-		*last = candidate;
-	}
-
-	for (i = top->len - 1; i > 0; i--) {
-		DirSizeEntry *a = &g_array_index (top, DirSizeEntry, i - 1);
-		DirSizeEntry *b = &g_array_index (top, DirSizeEntry, i);
-		if (a->size >= b->size)
-			break;
-		DirSizeEntry tmp = *a;
-		*a = *b;
-		*b = tmp;
-	}
-}
-
-static guint64
-scan_path_collect_top (const char  *path,
-	               const char  *mount_path,
-	               dev_t        dev,
-	               GCancellable *cancel,
-	               GArray      *top,
-	               gboolean     include_self,
-	               gint64       deadline_us,
-	               gboolean    *timed_out)
-{
-	DIR *dp;
-	struct dirent *entry;
-	struct stat pst;
-	guint64 total = 0;
-
-	if (deadline_us > 0 && g_get_monotonic_time () >= deadline_us) {
-		if (timed_out != NULL)
-			*timed_out = TRUE;
-		return 0;
-	}
-
-	if (g_cancellable_is_cancelled (cancel))
-		return 0;
-
-	if (lstat (path, &pst) != 0)
-		return 0;
-
-	if (S_ISREG (pst.st_mode)) {
-		total = (guint64) pst.st_size;
-		consider_top_offender (top, mount_path, path, total);
-		return total;
-	}
-
-	if (!S_ISDIR (pst.st_mode) || pst.st_dev != dev)
-		return 0;
-
-	dp = opendir (path);
-	if (dp == NULL)
-		return 0;
-
-	while ((entry = readdir (dp)) != NULL) {
-		struct stat st;
-		char *child;
-
-		if (deadline_us > 0 && g_get_monotonic_time () >= deadline_us) {
-			if (timed_out != NULL)
-				*timed_out = TRUE;
-			break;
-		}
-
-		if (g_cancellable_is_cancelled (cancel))
-			break;
-
-		if (g_strcmp0 (entry->d_name, ".") == 0 ||
-		    g_strcmp0 (entry->d_name, "..") == 0)
-			continue;
-
-		child = g_build_filename (path, entry->d_name, NULL);
-
-		if (lstat (child, &st) == 0) {
-			if (S_ISREG (st.st_mode)) {
-				total += (guint64) st.st_size;
-				consider_top_offender (top, mount_path, child,
-				                      (guint64) st.st_size);
-			} else if (S_ISDIR (st.st_mode) && st.st_dev == dev) {
-				total += scan_path_collect_top (child,
-				                               mount_path,
-				                               dev,
-				                               cancel,
-				                               top,
-				                               TRUE,
-				                               deadline_us,
-				                               timed_out);
-			}
-		}
-
-		g_free (child);
-	}
-
-	closedir (dp);
-
-	if (!include_self && top->len == 0 && total > 0)
-		consider_top_offender (top, mount_path, path, total);
-
-	if (include_self)
-		consider_top_offender (top, mount_path, path, total);
-
-	return total;
 }
 
 /* ── Donut drawing (thin ring) ─────────────────────────────────── */
@@ -539,7 +314,8 @@ donut_draw_cb (GtkWidget *widget, cairo_t *cr, gpointer user_data)
 	double cy = h / 2.0;
 	double outer = MIN (w, h) / 2.0 - 4;
 	double inner = outer * 0.78;   /* thinner ring */
-	const Rgb *uc = &used_colours[v->colour_idx % N_COLOURS];
+	const NemoDirColour *uc = nemo_dir_get_colour (v->colour_idx);
+	const NemoDirColour *fc = nemo_dir_get_free_colour ();
 
 	double start = -M_PI / 2.0;
 	double used_end = start + v->fraction * 2.0 * M_PI;
@@ -558,7 +334,7 @@ donut_draw_cb (GtkWidget *widget, cairo_t *cr, gpointer user_data)
 		cairo_arc (cr, cx, cy, outer, used_end, start + 2.0 * M_PI);
 		cairo_arc_negative (cr, cx, cy, inner, start + 2.0 * M_PI, used_end);
 		cairo_close_path (cr);
-		cairo_set_source_rgba (cr, free_colour.r, free_colour.g, free_colour.b, 0.30);
+		cairo_set_source_rgba (cr, fc->r, fc->g, fc->b, 0.30);
 		cairo_fill (cr);
 	}
 
@@ -798,166 +574,6 @@ gather_volumes (NemoOverview *self)
 	g_object_unref (monitor);
 }
 
-/* ── Vertical Pareto bar chart drawing ─────────────────────────── */
-
-static gboolean
-pareto_draw_cb (GtkWidget *widget, cairo_t *cr, gpointer user_data)
-{
-	ParetoDrawData *pd = user_data;
-	const Rgb *colour = &used_colours[pd->colour_idx % N_COLOURS];
-	guint count = MIN (pd->entries->len, (guint) VBAR_MAX_BARS);
-	guint i;
-
-	if (count == 0) return FALSE;
-
-	guint64 max_size = g_array_index (pd->entries, DirSizeEntry, 0).size;
-	if (max_size == 0) return FALSE;
-
-	double baseline_y = VBAR_SIZE_H + VBAR_MAX_H;
-
-	for (i = 0; i < count; i++) {
-		DirSizeEntry *e = &g_array_index (pd->entries, DirSizeEntry, i);
-		double frac = (double) e->size / (double) max_size;
-		double bar_h = frac * VBAR_MAX_H;
-		double x = i * (VBAR_W + VBAR_GAP);
-
-		/* ── vertical bar (grows upward from baseline) ── */
-		cairo_set_source_rgba (cr, colour->r, colour->g, colour->b, 0.70);
-		cairo_rectangle (cr, x, baseline_y - bar_h, VBAR_W, bar_h);
-		cairo_fill (cr);
-
-		/* ── size text above bar ── */
-		/* ── directory name on top (above bar) ── */
-		{
-			char *nm = e->name;
-			PangoLayout *lay = pango_cairo_create_layout (cr);
-			PangoFontDescription *fd =
-				pango_font_description_from_string ("Sans 8");
-			int tw, th;
-
-			pango_layout_set_font_description (lay, fd);
-			pango_font_description_free (fd);
-			pango_layout_set_text (lay, nm, -1);
-			pango_layout_set_width (lay, VBAR_W * PANGO_SCALE);
-			pango_layout_set_ellipsize (lay, PANGO_ELLIPSIZE_END);
-			pango_layout_get_pixel_size (lay, &tw, &th);
-
-			cairo_set_source_rgba (cr, 0.65, 0.65, 0.65, 1.0);
-			cairo_move_to (cr,
-			               x + (VBAR_W - tw) / 2.0,
-			               baseline_y - bar_h - th - 2);
-			pango_cairo_show_layout (cr, lay);
-			g_object_unref (lay);
-		}
-
-		/* ── size text below bar ── */
-		{
-			char *sz = g_format_size (e->size);
-			PangoLayout *lay = pango_cairo_create_layout (cr);
-			PangoFontDescription *fd =
-				pango_font_description_from_string ("Sans 7");
-			int tw, th;
-
-			pango_layout_set_font_description (lay, fd);
-			pango_font_description_free (fd);
-			pango_layout_set_text (lay, e->name, -1);
-			pango_layout_set_text (lay, sz, -1);
-			pango_layout_get_pixel_size (lay, &tw, &th);
-
-			cairo_set_source_rgba (cr, 0.65, 0.65, 0.65, 1.0);
-			cairo_move_to (cr,
-			               x + (VBAR_W - tw) / 2.0,
-			               baseline_y + 2);
-			pango_cairo_show_layout (cr, lay);
-			g_object_unref (lay);
-			g_free (sz);
-		}
-	}
-
-	return FALSE;
-}
-
-/* ── Double-click on a bar → navigate to that directory ────────── */
-
-static gboolean
-pareto_button_press_cb (GtkWidget      *widget,
-                        GdkEventButton *event,
-                        gpointer        user_data)
-{
-	ParetoDrawData *pd = user_data;
-	guint count;
-	int bar_idx;
-	DirSizeEntry *e;
-	GFile *location;
-	GtkWidget *toplevel;
-
-	if (event->type != GDK_2BUTTON_PRESS || event->button != 1)
-		return FALSE;
-
-	count = MIN (pd->entries->len, (guint) VBAR_MAX_BARS);
-	bar_idx = (int) (event->x) / (VBAR_W + VBAR_GAP);
-
-	if (bar_idx < 0 || bar_idx >= (int) count)
-		return FALSE;
-
-	e = &g_array_index (pd->entries, DirSizeEntry, bar_idx);
-	if (e->full_path == NULL)
-		return FALSE;
-
-	location = g_file_new_for_path (e->full_path);
-	toplevel = gtk_widget_get_toplevel (widget);
-
-	if (NEMO_IS_WINDOW (toplevel)) {
-		NemoWindowSlot *slot =
-			nemo_window_get_active_slot (NEMO_WINDOW (toplevel));
-		if (slot != NULL)
-			nemo_window_slot_open_location (slot, location, 0);
-	}
-
-	g_object_unref (location);
-	return TRUE;
-}
-
-/* ── Hover tooltip on a bar: full path + size ─────────────────── */
-
-static gboolean
-pareto_query_tooltip_cb (GtkWidget  *widget,
-                         gint        x,
-                         gint        y,
-                         gboolean    keyboard_mode,
-                         GtkTooltip *tooltip,
-                         gpointer    user_data)
-{
-	ParetoDrawData *pd = user_data;
-	guint count;
-	int bar_idx;
-	DirSizeEntry *e;
-	char *sz;
-	char *tip;
-
-	(void) widget;
-	(void) y;
-	(void) keyboard_mode;
-
-	count = MIN (pd->entries->len, (guint) VBAR_MAX_BARS);
-	bar_idx = x / (VBAR_W + VBAR_GAP);
-
-	if (bar_idx < 0 || bar_idx >= (int) count)
-		return FALSE;
-
-	e = &g_array_index (pd->entries, DirSizeEntry, bar_idx);
-	sz = g_format_size (e->size);
-	tip = g_strdup_printf ("%s\n%s",
-	                       e->full_path != NULL ? e->full_path : e->name,
-	                       sz);
-
-	gtk_tooltip_set_text (tooltip, tip);
-
-	g_free (tip);
-	g_free (sz);
-	return TRUE;
-}
-
 static gboolean
 heading_button_press_cb (GtkWidget *widget,
                         GdkEventButton *event,
@@ -977,93 +593,6 @@ heading_button_press_cb (GtkWidget *widget,
 	}
 	
 	return FALSE;
-}
-
-static gboolean
-list_path_button_press_cb (GtkWidget *widget,
-                           GdkEventButton *event,
-                           gpointer user_data)
-{
-	const char *full_path;
-	GFile *location;
-	GtkWidget *toplevel;
-
-	(void) user_data;
-
-	if (event->button != 1 ||
-	    !(event->type == GDK_BUTTON_PRESS || event->type == GDK_2BUTTON_PRESS))
-		return FALSE;
-
-	full_path = g_object_get_data (G_OBJECT (widget), "full-path");
-	if (full_path == NULL)
-		return FALSE;
-
-	location = g_file_new_for_path (full_path);
-	toplevel = gtk_widget_get_toplevel (widget);
-	if (NEMO_IS_WINDOW (toplevel)) {
-		NemoWindowSlot *slot =
-			nemo_window_get_active_slot (NEMO_WINDOW (toplevel));
-		if (slot != NULL)
-			nemo_window_slot_open_location (slot, location, 0);
-	}
-	g_object_unref (location);
-	return TRUE;
-}
-
-/* ── Show pointer cursor on chart to hint clickability ─────────── */
-
-static void
-pareto_realize_cb (GtkWidget *widget, gpointer data)
-{
-	GdkCursor *hand;
-	(void) data;
-
-	hand = gdk_cursor_new_from_name (gtk_widget_get_display (widget),
-	                                 "pointer");
-	if (hand != NULL) {
-		gdk_window_set_cursor (gtk_widget_get_window (widget), hand);
-		g_object_unref (hand);
-	}
-}
-
-/* ── Helper: create one vertical bar chart widget ──────────────── */
-
-static GtkWidget *
-create_pareto_chart (GArray *entries, int colour_idx)
-{
-	GtkWidget *draw_area;
-	ParetoDrawData *pd;
-	guint count = MIN (entries->len, (guint) VBAR_MAX_BARS);
-	int chart_w = count * (VBAR_W + VBAR_GAP);
-
-	draw_area = gtk_drawing_area_new ();
-	gtk_widget_set_size_request (draw_area, chart_w, VBAR_TOTAL_H);
-	gtk_widget_set_halign (draw_area, GTK_ALIGN_START);
-	gtk_widget_set_margin_start (draw_area, 0);
-	gtk_widget_set_margin_end (draw_area, 0);
-	gtk_widget_set_margin_bottom (draw_area, 8);
-	gtk_widget_set_hexpand (draw_area, TRUE);
-	gtk_widget_set_has_tooltip (draw_area, TRUE);
-
-	/* Enable button-press events for double-click navigation */
-	gtk_widget_add_events (draw_area, GDK_BUTTON_PRESS_MASK);
-
-	pd = g_new0 (ParetoDrawData, 1);
-	pd->colour_idx = colour_idx;
-	pd->entries    = g_array_ref (entries);
-
-	g_object_set_data_full (G_OBJECT (draw_area), "pareto-data",
-	                        pd, pareto_draw_data_free);
-	g_signal_connect (draw_area, "draw",
-	                  G_CALLBACK (pareto_draw_cb), pd);
-	g_signal_connect (draw_area, "button-press-event",
-	                  G_CALLBACK (pareto_button_press_cb), pd);
-	g_signal_connect (draw_area, "query-tooltip",
-	                  G_CALLBACK (pareto_query_tooltip_cb), pd);
-	g_signal_connect (draw_area, "realize",
-	                  G_CALLBACK (pareto_realize_cb), NULL);
-
-	return draw_area;
 }
 
 static void
@@ -1163,7 +692,7 @@ add_pareto_placeholder (NemoOverview *self,
 {
 	GtkWidget *volume_box;
 	GtkWidget *heading;
-	GtkWidget *sub;
+	NemoDirAnalyzer *analyzer;
 	char *heading_text;
 
 	overview_scan_debug_log ("ui placeholder: volume='%s' mount='%s'",
@@ -1197,14 +726,11 @@ add_pareto_placeholder (NemoOverview *self,
 	gtk_box_pack_start (GTK_BOX (volume_box), heading, FALSE, FALSE, 0);
 	gtk_widget_show (heading);
 
-	sub = gtk_label_new (_("Scanning largest directories…"));
-	gtk_widget_set_opacity (sub, 0.6);
-	gtk_widget_set_halign (sub, GTK_ALIGN_START);
-	gtk_widget_set_margin_start (sub, 8);
-	gtk_widget_set_margin_top (sub, 4);
-	gtk_widget_set_margin_bottom (sub, 12);
-	gtk_box_pack_start (GTK_BOX (volume_box), sub, FALSE, FALSE, 0);
-	gtk_widget_show (sub);
+	analyzer = nemo_dir_analyzer_new ();
+	nemo_dir_analyzer_show_scanning (analyzer, volume_name);
+	gtk_box_pack_start (GTK_BOX (volume_box),
+	                    GTK_WIDGET (analyzer), FALSE, FALSE, 0);
+	gtk_widget_show (GTK_WIDGET (analyzer));
 
 	add_pareto_mount_box_ordered (self, volume_box, mount_path);
 	gtk_widget_show (volume_box);
@@ -1218,7 +744,8 @@ pareto_idle_cb (gpointer data)
 	ScanResult *sr = data;
 	NemoOverview *self;
 	GtkWidget *volume_box;
-	GtkWidget *heading, *chart;
+	GtkWidget *heading;
+	NemoDirAnalyzer *analyzer;
 	char *heading_text;
 	gboolean have_deep;
 
@@ -1251,11 +778,10 @@ pareto_idle_cb (gpointer data)
 	                        g_strdup (sr->mount_path),
 	                        g_free);
 
-	/* ── Volume heading ── */
+	/* ── Volume heading (clickable for bookmark/scroll) ── */
 	heading_text = g_strdup_printf ("%s  (%s)", sr->volume_name, sr->mount_path);
 	heading = gtk_label_new (heading_text);
 	g_free (heading_text);
-
 	{
 		PangoAttrList *ha = pango_attr_list_new ();
 		pango_attr_list_insert (ha, pango_attr_weight_new (PANGO_WEIGHT_BOLD));
@@ -1267,8 +793,6 @@ pareto_idle_cb (gpointer data)
 	gtk_widget_set_margin_start (heading, 8);
 	gtk_widget_set_margin_top (heading, 16);
 	gtk_widget_set_margin_bottom (heading, 2);
-	
-	/* Make heading clickable to bookmark this volume */
 	{
 		GtkWidget *heading_event = gtk_event_box_new ();
 		gtk_event_box_set_visible_window (GTK_EVENT_BOX (heading_event), FALSE);
@@ -1281,87 +805,13 @@ pareto_idle_cb (gpointer data)
 		gtk_widget_show (heading_event);
 	}
 
-	/* One deep chart per drive */
-	GtkWidget *hbox = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 16);
-	gtk_widget_set_margin_start (hbox, 8);
-	gtk_widget_set_margin_end (hbox, 8);
-	gtk_widget_set_margin_bottom (hbox, 16);
-	
-	{
-		GtkWidget *sub = gtk_label_new (_("Top offenders (full depth)"));
-		gtk_widget_set_opacity (sub, 0.6);
-		gtk_widget_set_halign (sub, GTK_ALIGN_START);
-		gtk_widget_set_margin_start (sub, 8);
-		gtk_widget_set_margin_top (sub, 4);
-		gtk_box_pack_start (GTK_BOX (volume_box), sub, FALSE, FALSE, 0);
-		gtk_widget_show (sub);
-
-		chart = create_pareto_chart (sr->deep, sr->colour_idx);
-		gtk_box_pack_start (GTK_BOX (hbox), chart, FALSE, FALSE, 0);
-		gtk_widget_show (chart);
-
-		gtk_box_pack_start (GTK_BOX (volume_box), hbox, FALSE, FALSE, 0);
-		gtk_widget_show (hbox);
-	}
-
-	/* Ranked list, du-like, with clickable full relative paths */
-	{
-		GtkWidget *list_grid = gtk_grid_new ();
-		guint i;
-		guint count = MIN (sr->deep->len, (guint) TOP_OFFENDERS_MAX);
-
-		gtk_widget_set_margin_start (list_grid, 8);
-		gtk_widget_set_margin_end (list_grid, 8);
-		gtk_widget_set_margin_bottom (list_grid, 16);
-		gtk_grid_set_row_spacing (GTK_GRID (list_grid), 2);
-		gtk_grid_set_column_spacing (GTK_GRID (list_grid), 10);
-
-		for (i = 0; i < count; i++) {
-			DirSizeEntry *e = &g_array_index (sr->deep, DirSizeEntry, i);
-			GtkWidget *size_lbl;
-			GtkWidget *row_click;
-			GtkWidget *path_lbl;
-			char *sz = g_format_size (e->size);
-
-			size_lbl = gtk_label_new (sz);
-			gtk_widget_set_halign (size_lbl, GTK_ALIGN_START);
-			gtk_widget_set_opacity (size_lbl, 0.8);
-			gtk_grid_attach (GTK_GRID (list_grid), size_lbl, 0, (gint) i, 1, 1);
-			gtk_widget_show (size_lbl);
-
-			row_click = gtk_event_box_new ();
-			gtk_widget_set_halign (row_click, GTK_ALIGN_FILL);
-			gtk_widget_set_hexpand (row_click, TRUE);
-			gtk_event_box_set_visible_window (GTK_EVENT_BOX (row_click), FALSE);
-			gtk_widget_add_events (row_click, GDK_BUTTON_PRESS_MASK);
-			g_object_set_data_full (G_OBJECT (row_click),
-			                        "full-path",
-			                        g_strdup (e->full_path != NULL ? e->full_path : ""),
-			                        g_free);
-			g_signal_connect (row_click, "button-press-event",
-			                  G_CALLBACK (list_path_button_press_cb), NULL);
-			g_signal_connect (row_click, "realize",
-			                  G_CALLBACK (pareto_realize_cb), NULL);
-
-			path_lbl = gtk_label_new (e->name);
-			gtk_label_set_xalign (GTK_LABEL (path_lbl), 0.0);
-			gtk_label_set_ellipsize (GTK_LABEL (path_lbl), PANGO_ELLIPSIZE_MIDDLE);
-			gtk_widget_set_halign (path_lbl, GTK_ALIGN_START);
-			gtk_widget_set_hexpand (path_lbl, TRUE);
-			gtk_widget_set_tooltip_text (path_lbl,
-			                             e->full_path != NULL ? e->full_path : e->name);
-			gtk_container_add (GTK_CONTAINER (row_click), path_lbl);
-			gtk_widget_show (path_lbl);
-			gtk_widget_show (row_click);
-
-			gtk_grid_attach (GTK_GRID (list_grid), row_click, 1, (gint) i, 1, 1);
-			g_free (sz);
-		}
-
-		/* Pack list into the hbox alongside the chart */
-		gtk_box_pack_start (GTK_BOX (hbox), list_grid, TRUE, TRUE, 0);
-		gtk_widget_show (list_grid);
-	}
+	/* ── NemoDirAnalyzer shows chart + ranked list ── */
+	analyzer = nemo_dir_analyzer_new ();
+	nemo_dir_analyzer_set_entries (analyzer, sr->deep,
+	                               sr->volume_name, sr->colour_idx);
+	gtk_box_pack_start (GTK_BOX (volume_box),
+	                    GTK_WIDGET (analyzer), FALSE, FALSE, 0);
+	gtk_widget_show (GTK_WIDGET (analyzer));
 
 	add_pareto_mount_box_ordered (self, volume_box, sr->mount_path);
 	gtk_widget_show (volume_box);
@@ -1380,13 +830,10 @@ scan_thread_func (gpointer data)
 	guint i;
 
 	for (i = 0; i < td->n_volumes; i++) {
-		struct stat mount_st;
 		GArray *deep;
 		ScanResult *sr;
 		gint64 started_us;
 		gint64 elapsed_ms;
-		gint64 deadline_us;
-		gboolean timed_out = FALSE;
 
 		if (g_cancellable_is_cancelled (td->cancel))
 			break;
@@ -1396,32 +843,19 @@ scan_thread_func (gpointer data)
 		                         td->volume_names[i],
 		                         td->mount_paths[i]);
 
-		if (stat (td->mount_paths[i], &mount_st) != 0) {
-			overview_scan_debug_log ("scan skip (stat failed): mount='%s'",
-			                         td->mount_paths[i]);
-			continue;
-		}
-
-		deep = g_array_new (FALSE, TRUE, sizeof (DirSizeEntry));
-		g_array_set_clear_func (deep, (GDestroyNotify) dir_size_entry_clear);
-		deadline_us = started_us + ((gint64) SCAN_TIME_BUDGET_MS_UI * 1000);
-
-		scan_path_collect_top (td->mount_paths[i],
-		                      td->mount_paths[i],
-		                      mount_st.st_dev,
-		                      td->cancel,
-		                      deep,
-		                      FALSE,
-		                      deadline_us,
-		                      &timed_out);
+		deep = nemo_dir_scan_collect_top (td->mount_paths[i],
+		                                  td->cancel,
+		                                  SCAN_TIME_BUDGET_MS_UI,
+		                                  NULL);
 
 		elapsed_ms = (g_get_monotonic_time () - started_us) / 1000;
 
-		if (g_cancellable_is_cancelled (td->cancel)) {
-			overview_scan_debug_log ("scan cancelled: mount='%s' elapsed=%" G_GINT64_FORMAT "ms",
+		if (deep == NULL || g_cancellable_is_cancelled (td->cancel)) {
+			overview_scan_debug_log ("scan cancelled/failed: mount='%s' elapsed=%" G_GINT64_FORMAT "ms",
 			                         td->mount_paths[i],
 			                         elapsed_ms);
-			g_array_unref (deep);
+			if (deep != NULL)
+				g_array_unref (deep);
 			break;
 		}
 
@@ -1442,11 +876,6 @@ scan_thread_func (gpointer data)
 		                         td->mount_paths[i],
 		                         deep->len,
 		                         elapsed_ms);
-		if (timed_out) {
-			overview_scan_debug_log ("scan timed out (approximate): mount='%s' budget=%dms",
-			                         td->mount_paths[i],
-			                         SCAN_TIME_BUDGET_MS_UI);
-		}
 
 		g_idle_add (pareto_idle_cb, sr);
 	}
@@ -1537,36 +966,19 @@ cache_scan_thread_func (gpointer data)
 	guint i;
 
 	for (i = 0; i < job->n_volumes; i++) {
-		struct stat mount_st;
 		GArray *deep;
-		gint64 deadline_us;
-		gboolean timed_out = FALSE;
 
 		if (g_scan_cache_cancel != NULL &&
 		    g_cancellable_is_cancelled (g_scan_cache_cancel))
 			break;
 
-		if (stat (job->mount_paths[i], &mount_st) != 0)
+		deep = nemo_dir_scan_collect_top (job->mount_paths[i],
+		                                  g_scan_cache_cancel,
+		                                  SCAN_TIME_BUDGET_MS_CACHE,
+		                                  NULL);
+
+		if (deep == NULL)
 			continue;
-
-		deep = g_array_new (FALSE, TRUE, sizeof (DirSizeEntry));
-		g_array_set_clear_func (deep, (GDestroyNotify) dir_size_entry_clear);
-		deadline_us = g_get_monotonic_time () + ((gint64) SCAN_TIME_BUDGET_MS_CACHE * 1000);
-
-		scan_path_collect_top (job->mount_paths[i],
-		                      job->mount_paths[i],
-		                      mount_st.st_dev,
-		                      g_scan_cache_cancel,
-		                      deep,
-		                      FALSE,
-		                      deadline_us,
-		                      &timed_out);
-
-		if (timed_out) {
-			overview_scan_debug_log ("cache scan timed out (approximate): mount='%s' budget=%dms",
-			                         job->mount_paths[i],
-			                         SCAN_TIME_BUDGET_MS_CACHE);
-		}
 
 		if (g_scan_cache_cancel != NULL &&
 		    g_cancellable_is_cancelled (g_scan_cache_cancel)) {

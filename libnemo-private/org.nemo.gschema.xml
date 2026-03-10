@@ -990,8 +990,12 @@
       <summary>Toggle sidebar</summary>
     </key>
     <key name="split-view" type="s">
-      <default>'F3'</default>
+      <default>'&lt;Control&gt;F3'</default>
       <summary>Toggle split view</summary>
+    </key>
+    <key name="quick-preview" type="s">
+      <default>'F3'</default>
+      <summary>Quick file preview</summary>
     </key>
     <key name="switch-pane" type="s">
       <default>'F6'</default>

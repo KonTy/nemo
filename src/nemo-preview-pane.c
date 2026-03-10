@@ -25,6 +25,9 @@
 
 #include <config.h>
 #include "nemo-preview-pane.h"
+#include "nemo-preview-utils.h"
+#include "nemo-image-viewer.h"
+#include "nemo-paged-viewer.h"
 
 #include <math.h>
 #include <glib/gi18n.h>
@@ -46,7 +49,6 @@
 #endif
 #endif
 
-#define PREVIEW_TEXT_MAX_BYTES 4096
 #define GPS_MAP_SIZE          150
 
 struct _NemoPreviewPane
@@ -56,27 +58,11 @@ struct _NemoPreviewPane
 	GtkWidget	*vpaned;
 	GtkWidget	*stack;
 
-	/* Image page */
-	GtkWidget	*image_page_box;
-	GtkWidget	*image_scroll;
-	GtkWidget	*image_widget;
-	GtkWidget	*zoom_scale;
-	GtkWidget	*fit_check;
+	/* Image page (shared widget) */
+	NemoImageViewer	*image_viewer;
 
-	/* Original image data, kept for re-scaling on zoom / resize */
-	GdkPixbuf		*original_pixbuf;
-	GdkPixbufAnimation	*animation;
-	GdkPixbufAnimationIter	*anim_iter;
-	guint			 anim_timeout_id;
-	gboolean		 is_animated;
-	double			 zoom_level;
-	gboolean		 fit_to_pane;
-	gulong			 image_size_alloc_id;
-
-	/* Text page */
-	GtkWidget	*text_scroll;
-	GtkWidget	*text_view;
-	GtkTextBuffer	*text_buffer;
+	/* Text page (shared paged viewer — handles files of any size) */
+	NemoPagedViewer	*paged_viewer;
 
 #ifdef HAVE_GSTREAMER
 	/* Video page */
@@ -131,300 +117,9 @@ struct _NemoPreviewPane
 G_DEFINE_TYPE (NemoPreviewPane, nemo_preview_pane, GTK_TYPE_BOX)
 
 /* Forward declarations */
-static void apply_zoom (NemoPreviewPane *self);
-static void zoom_scale_changed_cb (GtkRange *range, gpointer user_data);
-static void stop_animation (NemoPreviewPane *self);
-
-static gboolean
-mime_type_is_image (const char *mime)
-{
-	return mime != NULL && g_str_has_prefix (mime, "image/");
-}
-
-static gboolean
-mime_type_is_text (const char *mime)
-{
-	if (mime == NULL) {
-		return FALSE;
-	}
-
-	if (g_str_has_prefix (mime, "text/")) {
-		return TRUE;
-	}
-
-	if (g_strcmp0 (mime, "application/json") == 0 ||
-	    g_strcmp0 (mime, "application/xml") == 0 ||
-	    g_strcmp0 (mime, "application/x-shellscript") == 0 ||
-	    g_strcmp0 (mime, "application/javascript") == 0 ||
-	    g_strcmp0 (mime, "application/x-yaml") == 0 ||
-	    g_strcmp0 (mime, "application/toml") == 0 ||
-	    g_strcmp0 (mime, "application/x-desktop") == 0) {
-		return TRUE;
-	}
-
-	return FALSE;
-}
-
 #ifdef HAVE_GSTREAMER
-static gboolean
-mime_type_is_video (const char *mime)
-{
-	return mime != NULL && g_str_has_prefix (mime, "video/");
-}
-
-static gboolean
-mime_type_is_audio (const char *mime)
-{
-	return mime != NULL && g_str_has_prefix (mime, "audio/");
-}
+static void stop_video (NemoPreviewPane *self);
 #endif
-
-static void
-stop_animation (NemoPreviewPane *self)
-{
-	if (self->anim_timeout_id != 0) {
-		g_source_remove (self->anim_timeout_id);
-		self->anim_timeout_id = 0;
-	}
-	g_clear_object (&self->anim_iter);
-}
-
-static void
-clear_image_data (NemoPreviewPane *self)
-{
-	stop_animation (self);
-	g_clear_object (&self->animation);
-	g_clear_object (&self->original_pixbuf);
-	self->is_animated = FALSE;
-}
-
-static GdkPixbuf *
-get_base_pixbuf (NemoPreviewPane *self)
-{
-	if (self->is_animated && self->anim_iter != NULL) {
-		return gdk_pixbuf_animation_iter_get_pixbuf (self->anim_iter);
-	}
-	return self->original_pixbuf;
-}
-
-static void
-apply_zoom (NemoPreviewPane *self)
-{
-	GdkPixbuf *base;
-	GdkPixbuf *scaled;
-	int pw, ph, nw, nh, avail;
-	double z;
-
-	base = get_base_pixbuf (self);
-	if (base == NULL) {
-		return;
-	}
-
-	pw = gdk_pixbuf_get_width (base);
-	ph = gdk_pixbuf_get_height (base);
-	z = self->zoom_level;
-
-	if (self->fit_to_pane) {
-		avail = gtk_widget_get_allocated_width (self->image_scroll);
-		if (avail > 20) {
-			z = (double) (avail - 20) / pw;
-			if (z > 4.0) {
-				z = 4.0;
-			}
-			if (z < 0.01) {
-				z = 0.01;
-			}
-		}
-	}
-
-	nw = MAX ((int) (pw * z), 1);
-	nh = MAX ((int) (ph * z), 1);
-
-	scaled = gdk_pixbuf_scale_simple (base, nw, nh, GDK_INTERP_BILINEAR);
-	gtk_image_set_from_pixbuf (GTK_IMAGE (self->image_widget), scaled);
-	g_object_unref (scaled);
-}
-
-/* Compute a zoom level that fits the image to the pane width */
-static double
-compute_fit_zoom (NemoPreviewPane *self, int image_width)
-{
-	int avail;
-
-	avail = gtk_widget_get_allocated_width (self->image_scroll);
-	if (avail > 20 && image_width > avail - 20) {
-		return (double) (avail - 20) / image_width;
-	}
-
-	return 1.0;
-}
-
-static void
-update_zoom_scale_quietly (NemoPreviewPane *self, double value)
-{
-	g_signal_handlers_block_by_func (self->zoom_scale,
-					 zoom_scale_changed_cb, self);
-	gtk_range_set_value (GTK_RANGE (self->zoom_scale), value);
-	g_signal_handlers_unblock_by_func (self->zoom_scale,
-					   zoom_scale_changed_cb, self);
-}
-
-static gboolean
-anim_advance_cb (gpointer user_data)
-{
-	NemoPreviewPane *self = NEMO_PREVIEW_PANE (user_data);
-	GTimeVal tv;
-	int delay;
-
-	if (self->anim_iter == NULL) {
-		self->anim_timeout_id = 0;
-		return G_SOURCE_REMOVE;
-	}
-
-	g_get_current_time (&tv);
-	gdk_pixbuf_animation_iter_advance (self->anim_iter, &tv);
-	apply_zoom (self);
-
-	delay = gdk_pixbuf_animation_iter_get_delay_time (self->anim_iter);
-	if (delay < 0) {
-		delay = 100;
-	}
-
-	self->anim_timeout_id = g_timeout_add (delay, anim_advance_cb, self);
-	return G_SOURCE_REMOVE;
-}
-
-static void
-start_animation (NemoPreviewPane *self)
-{
-	GTimeVal tv;
-	int delay;
-
-	g_get_current_time (&tv);
-
-	self->anim_iter = gdk_pixbuf_animation_get_iter (self->animation, &tv);
-	if (self->anim_iter == NULL) {
-		return;
-	}
-
-	apply_zoom (self);
-
-	delay = gdk_pixbuf_animation_iter_get_delay_time (self->anim_iter);
-	if (delay < 0) {
-		delay = 100;
-	}
-
-	self->anim_timeout_id = g_timeout_add (delay, anim_advance_cb, self);
-}
-
-static void
-zoom_scale_changed_cb (GtkRange *range, gpointer user_data)
-{
-	NemoPreviewPane *self = NEMO_PREVIEW_PANE (user_data);
-
-	self->zoom_level = gtk_range_get_value (range);
-
-	if (self->fit_to_pane) {
-		self->fit_to_pane = FALSE;
-		gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON (self->fit_check),
-					      FALSE);
-	}
-
-	apply_zoom (self);
-}
-
-static void
-fit_check_toggled_cb (GtkToggleButton *btn, gpointer user_data)
-{
-	NemoPreviewPane *self = NEMO_PREVIEW_PANE (user_data);
-
-	self->fit_to_pane = gtk_toggle_button_get_active (btn);
-	g_settings_set_boolean (nemo_preview_pane_preferences,
-				"fit-to-pane", self->fit_to_pane);
-	if (self->fit_to_pane) {
-		apply_zoom (self);
-	}
-}
-
-static void
-image_scroll_size_allocate_cb (GtkWidget    *widget,
-			       GdkRectangle *allocation,
-			       gpointer      user_data)
-{
-	NemoPreviewPane *self = NEMO_PREVIEW_PANE (user_data);
-
-	if (self->fit_to_pane && get_base_pixbuf (self) != NULL) {
-		apply_zoom (self);
-	}
-}
-
-static void
-image_load_ready_cb (GObject      *source,
-		     GAsyncResult *result,
-		     gpointer      user_data)
-{
-	NemoPreviewPane *self = NEMO_PREVIEW_PANE (user_data);
-	GInputStream *stream = G_INPUT_STREAM (source);
-	GdkPixbufAnimation *anim;
-	GdkPixbuf *first;
-	GError *error = NULL;
-	int pw;
-
-	anim = gdk_pixbuf_animation_new_from_stream_finish (result, &error);
-	g_object_unref (stream);
-
-	if (error != NULL) {
-		if (!g_error_matches (error, G_IO_ERROR, G_IO_ERROR_CANCELLED)) {
-			g_warning ("Preview pane: failed to load image: %s",
-				   error->message);
-			gtk_stack_set_visible_child_name (GTK_STACK (self->stack),
-							  "info");
-		}
-		g_error_free (error);
-		return;
-	}
-
-	if (anim == NULL) {
-		return;
-	}
-
-	clear_image_data (self);
-
-	if (gdk_pixbuf_animation_is_static_image (anim)) {
-		self->original_pixbuf = g_object_ref (
-			gdk_pixbuf_animation_get_static_image (anim));
-		self->is_animated = FALSE;
-		g_object_unref (anim);
-
-		pw = gdk_pixbuf_get_width (self->original_pixbuf);
-
-		if (self->fit_to_pane) {
-			apply_zoom (self);
-		} else {
-			self->zoom_level = compute_fit_zoom (self, pw);
-			update_zoom_scale_quietly (self, self->zoom_level);
-			apply_zoom (self);
-		}
-	} else {
-		self->animation = anim;
-		self->is_animated = TRUE;
-
-		first = gdk_pixbuf_animation_get_static_image (anim);
-		if (first != NULL) {
-			pw = gdk_pixbuf_get_width (first);
-			if (!self->fit_to_pane) {
-				self->zoom_level = compute_fit_zoom (self, pw);
-			}
-			update_zoom_scale_quietly (self, self->zoom_level);
-		}
-
-		start_animation (self);
-	}
-
-	gtk_widget_show (self->zoom_scale);
-	gtk_widget_show (self->fit_check);
-	gtk_stack_set_visible_child_name (GTK_STACK (self->stack), "image");
-}
 
 static void
 load_image_preview (NemoPreviewPane *self, NemoFile *file)
@@ -432,6 +127,7 @@ load_image_preview (NemoPreviewPane *self, NemoFile *file)
 	GFile *location;
 	GFileInputStream *stream;
 	GError *error = NULL;
+	gboolean fit;
 
 	location = nemo_file_get_location (file);
 	stream = g_file_read (location, NULL, &error);
@@ -444,96 +140,39 @@ load_image_preview (NemoPreviewPane *self, NemoFile *file)
 		return;
 	}
 
-	gdk_pixbuf_animation_new_from_stream_async (G_INPUT_STREAM (stream),
-						    self->cancellable,
-						    image_load_ready_cb,
-						    self);
-}
+	fit = g_settings_get_boolean (nemo_preview_pane_preferences,
+				      "fit-to-pane");
+	nemo_image_viewer_set_fit (self->image_viewer, fit);
+	nemo_image_viewer_set_show_controls (self->image_viewer, TRUE);
+	nemo_image_viewer_load_stream_async (self->image_viewer,
+					     G_INPUT_STREAM (stream),
+					     self->cancellable);
 
-typedef struct {
-	NemoPreviewPane *pane;
-	char buf[PREVIEW_TEXT_MAX_BYTES + 1];
-} TextLoadData;
-
-static void
-text_read_ready_cb (GObject      *source,
-		    GAsyncResult *result,
-		    gpointer      user_data)
-{
-	TextLoadData *data = user_data;
-	NemoPreviewPane *self = data->pane;
-	GInputStream *stream = G_INPUT_STREAM (source);
-	GError *error = NULL;
-	gssize bytes_read;
-
-	bytes_read = g_input_stream_read_finish (stream, result, &error);
-	g_object_unref (stream);
-
-	if (error != NULL) {
-		if (!g_error_matches (error, G_IO_ERROR, G_IO_ERROR_CANCELLED)) {
-			g_warning ("Preview pane: failed to read text: %s",
-				   error->message);
-		}
-		g_error_free (error);
-		g_free (data);
-		return;
-	}
-
-	if (bytes_read > 0) {
-		data->buf[bytes_read] = '\0';
-
-		if (!g_utf8_validate (data->buf, bytes_read, NULL)) {
-			gchar *valid = g_utf8_make_valid (data->buf, bytes_read);
-			gtk_text_buffer_set_text (self->text_buffer, valid, -1);
-			g_free (valid);
-		} else {
-			gtk_text_buffer_set_text (self->text_buffer,
-						 data->buf, bytes_read);
-		}
-
-		if (bytes_read == PREVIEW_TEXT_MAX_BYTES) {
-			GtkTextIter end;
-			gtk_text_buffer_get_end_iter (self->text_buffer, &end);
-			gtk_text_buffer_insert (self->text_buffer, &end,
-						"\n\xe2\x80\xa6", -1);
-		}
-
-		gtk_stack_set_visible_child_name (GTK_STACK (self->stack),
-						  "text");
-	}
-
-	g_free (data);
+	gtk_stack_set_visible_child_name (GTK_STACK (self->stack), "image");
 }
 
 static void
 load_text_preview (NemoPreviewPane *self, NemoFile *file)
 {
 	GFile *location;
-	GFileInputStream *stream;
-	GError *error = NULL;
-	TextLoadData *data;
+	char *path;
 
 	location = nemo_file_get_location (file);
-	stream = g_file_read (location, NULL, &error);
+	path = g_file_get_path (location);
 	g_object_unref (location);
 
-	if (error != NULL) {
-		g_warning ("Preview pane: cannot open text file: %s",
-			   error->message);
-		g_error_free (error);
+	if (path == NULL)
+		return;
+
+	nemo_paged_viewer_set_mode (self->paged_viewer,
+				    NEMO_VIEWER_MODE_TEXT);
+	if (!nemo_paged_viewer_open_file (self->paged_viewer, path, NULL)) {
+		g_free (path);
 		return;
 	}
+	g_free (path);
 
-	data = g_new0 (TextLoadData, 1);
-	data->pane = self;
-
-	g_input_stream_read_async (G_INPUT_STREAM (stream),
-				   data->buf,
-				   PREVIEW_TEXT_MAX_BYTES,
-				   G_PRIORITY_DEFAULT,
-				   self->cancellable,
-				   text_read_ready_cb,
-				   data);
+	gtk_stack_set_visible_child_name (GTK_STACK (self->stack), "text");
 }
 
 #ifdef HAVE_EXIF
@@ -906,7 +545,7 @@ update_details (NemoPreviewPane *self, NemoFile *file)
 		gboolean is_img;
 
 		mime_str = nemo_file_get_mime_type (file);
-		is_img = mime_type_is_image (mime_str);
+		is_img = nemo_preview_mime_is_image (mime_str);
 		g_free (mime_str);
 
 		if (is_img) {
@@ -1551,8 +1190,7 @@ load_media_preview (NemoPreviewPane *self,
 
 	gst_element_set_state (self->pipeline, GST_STATE_PLAYING);
 
-	gtk_widget_hide (self->zoom_scale);
-	gtk_widget_hide (self->fit_check);
+	nemo_image_viewer_set_show_controls (self->image_viewer, FALSE);
 	gtk_stack_set_visible_child_name (GTK_STACK (self->stack), "video");
 }
 
@@ -1570,7 +1208,8 @@ nemo_preview_pane_set_file (NemoPreviewPane *self,
 	g_object_unref (self->cancellable);
 	self->cancellable = g_cancellable_new ();
 
-	clear_image_data (self);
+	nemo_image_viewer_clear (self->image_viewer);
+	nemo_paged_viewer_close_file (self->paged_viewer);
 
 #ifdef HAVE_GSTREAMER
 	stop_video (self);
@@ -1597,14 +1236,14 @@ nemo_preview_pane_set_file (NemoPreviewPane *self,
 	if (nemo_file_is_directory (file)) {
 		show_info_preview (self, file);
 #ifdef HAVE_GSTREAMER
-	} else if (mime_type_is_video (mime)) {
+	} else if (nemo_preview_mime_is_video (mime)) {
 		load_media_preview (self, file, FALSE);
-	} else if (mime_type_is_audio (mime)) {
+	} else if (nemo_preview_mime_is_audio (mime)) {
 		load_media_preview (self, file, TRUE);
 #endif
-	} else if (mime_type_is_image (mime)) {
+	} else if (nemo_preview_mime_is_image (mime)) {
 		load_image_preview (self, file);
-	} else if (mime_type_is_text (mime)) {
+	} else if (nemo_preview_mime_is_text (mime)) {
 		load_text_preview (self, file);
 	} else {
 		show_info_preview (self, file);
@@ -1622,7 +1261,8 @@ nemo_preview_pane_clear (NemoPreviewPane *self)
 	g_object_unref (self->cancellable);
 	self->cancellable = g_cancellable_new ();
 
-	clear_image_data (self);
+	nemo_image_viewer_clear (self->image_viewer);
+	nemo_paged_viewer_close_file (self->paged_viewer);
 
 #ifdef HAVE_GSTREAMER
 	stop_video (self);
@@ -1636,8 +1276,7 @@ nemo_preview_pane_clear (NemoPreviewPane *self)
 	/* Reset vpaned position flag so it gets restored on next show */
 	self->details_vpaned_set = FALSE;
 
-	gtk_widget_hide (self->zoom_scale);
-	gtk_widget_hide (self->fit_check);
+	nemo_image_viewer_set_show_controls (self->image_viewer, FALSE);
 	gtk_stack_set_visible_child_name (GTK_STACK (self->stack), "empty");
 }
 
@@ -1652,7 +1291,8 @@ nemo_preview_pane_dispose (GObject *object)
 		g_clear_object (&self->map_cancellable);
 	}
 	disconnect_file (self);
-	clear_image_data (self);
+	nemo_image_viewer_clear (self->image_viewer);
+	nemo_paged_viewer_close_file (self->paged_viewer);
 
 #ifdef HAVE_GSTREAMER
 	stop_video (self);
@@ -1750,15 +1390,11 @@ nemo_preview_pane_init (NemoPreviewPane *self)
 {
 	GtkWidget *header;
 	GtkWidget *sep;
-	GtkWidget *ctrl_box;
 	GtkWidget *info_box;
 	GtkStyleContext *ctx;
-	GtkCssProvider *css;
 	GtkGrid *grid;
 
 	self->cancellable = g_cancellable_new ();
-	self->zoom_level = 1.0;
-	self->fit_to_pane = FALSE;
 	self->details_vpaned_set = FALSE;
 
 	gtk_orientable_set_orientation (GTK_ORIENTABLE (self),
@@ -1797,70 +1433,12 @@ nemo_preview_pane_init (NemoPreviewPane *self)
 	gtk_stack_add_named (GTK_STACK (self->stack), self->empty_label, "empty");
 	gtk_widget_show (self->empty_label);
 
-	/* Image page: scrolled area + zoom controls */
-	self->image_page_box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
-
-	self->image_scroll = gtk_scrolled_window_new (NULL, NULL);
-	gtk_scrolled_window_set_policy (GTK_SCROLLED_WINDOW (self->image_scroll),
-					GTK_POLICY_AUTOMATIC,
-					GTK_POLICY_AUTOMATIC);
-
-	self->image_widget = gtk_image_new ();
-	gtk_widget_set_halign (self->image_widget, GTK_ALIGN_CENTER);
-	gtk_widget_set_valign (self->image_widget, GTK_ALIGN_CENTER);
-	gtk_widget_set_margin_top (self->image_widget, 8);
-	gtk_widget_set_margin_bottom (self->image_widget, 8);
-	gtk_container_add (GTK_CONTAINER (self->image_scroll), self->image_widget);
-	gtk_widget_show (self->image_widget);
-
-	gtk_box_pack_start (GTK_BOX (self->image_page_box),
-			    self->image_scroll, TRUE, TRUE, 0);
-	gtk_widget_show (self->image_scroll);
-
-	/* Zoom controls */
-	ctrl_box = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 4);
-	gtk_widget_set_margin_start (ctrl_box, 4);
-	gtk_widget_set_margin_end (ctrl_box, 4);
-	gtk_widget_set_margin_top (ctrl_box, 2);
-	gtk_widget_set_margin_bottom (ctrl_box, 4);
-
-	self->fit_check = gtk_check_button_new_with_label (_("Fit"));
-	self->fit_to_pane = g_settings_get_boolean (nemo_preview_pane_preferences,
-						    "fit-to-pane");
-	gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON (self->fit_check),
-				     self->fit_to_pane);
-	g_signal_connect (self->fit_check, "toggled",
-			  G_CALLBACK (fit_check_toggled_cb), self);
-	gtk_box_pack_start (GTK_BOX (ctrl_box), self->fit_check, FALSE, FALSE, 0);
-	gtk_widget_set_no_show_all (self->fit_check, TRUE);
-	gtk_widget_show (self->fit_check);
-	gtk_widget_hide (self->fit_check);
-
-	self->zoom_scale = gtk_scale_new_with_range (GTK_ORIENTATION_HORIZONTAL,
-						     0.1, 4.0, 0.1);
-	gtk_scale_set_draw_value (GTK_SCALE (self->zoom_scale), TRUE);
-	gtk_scale_set_value_pos (GTK_SCALE (self->zoom_scale), GTK_POS_RIGHT);
-	gtk_range_set_value (GTK_RANGE (self->zoom_scale), 1.0);
-	gtk_widget_set_tooltip_text (self->zoom_scale, _("Zoom"));
-	g_signal_connect (self->zoom_scale, "value-changed",
-			  G_CALLBACK (zoom_scale_changed_cb), self);
-	gtk_box_pack_start (GTK_BOX (ctrl_box), self->zoom_scale, TRUE, TRUE, 0);
-	gtk_widget_set_no_show_all (self->zoom_scale, TRUE);
-	gtk_widget_show (self->zoom_scale);
-	gtk_widget_hide (self->zoom_scale);
-
-	gtk_box_pack_end (GTK_BOX (self->image_page_box),
-			  ctrl_box, FALSE, FALSE, 0);
-	gtk_widget_show (ctrl_box);
-
-	self->image_size_alloc_id =
-		g_signal_connect (self->image_scroll, "size-allocate",
-				  G_CALLBACK (image_scroll_size_allocate_cb),
-				  self);
-
+	/* Image page — shared NemoImageViewer widget */
+	self->image_viewer = nemo_image_viewer_new ();
+	nemo_image_viewer_set_show_controls (self->image_viewer, FALSE);
 	gtk_stack_add_named (GTK_STACK (self->stack),
-			     self->image_page_box, "image");
-	gtk_widget_show (self->image_page_box);
+			     GTK_WIDGET (self->image_viewer), "image");
+	gtk_widget_show (GTK_WIDGET (self->image_viewer));
 
 #ifdef HAVE_GSTREAMER
 	/* Video page: GStreamer overlay area + transport controls */
@@ -1956,36 +1534,11 @@ nemo_preview_pane_init (NemoPreviewPane *self)
 	gtk_widget_show (self->video_page_box);
 #endif
 
-	/* Text page */
-	self->text_scroll = gtk_scrolled_window_new (NULL, NULL);
-	gtk_scrolled_window_set_policy (GTK_SCROLLED_WINDOW (self->text_scroll),
-					GTK_POLICY_AUTOMATIC,
-					GTK_POLICY_AUTOMATIC);
-
-	self->text_view = gtk_text_view_new ();
-	gtk_text_view_set_editable (GTK_TEXT_VIEW (self->text_view), FALSE);
-	gtk_text_view_set_cursor_visible (GTK_TEXT_VIEW (self->text_view), FALSE);
-	gtk_text_view_set_wrap_mode (GTK_TEXT_VIEW (self->text_view),
-				     GTK_WRAP_WORD_CHAR);
-	gtk_text_view_set_left_margin (GTK_TEXT_VIEW (self->text_view), 8);
-	gtk_text_view_set_right_margin (GTK_TEXT_VIEW (self->text_view), 8);
-	gtk_text_view_set_top_margin (GTK_TEXT_VIEW (self->text_view), 8);
-
-	css = gtk_css_provider_new ();
-	gtk_css_provider_load_from_data (css,
-		"textview { font-family: Monospace; font-size: 9pt; }",
-		-1, NULL);
-	gtk_style_context_add_provider (
-		gtk_widget_get_style_context (self->text_view),
-		GTK_STYLE_PROVIDER (css),
-		GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
-	g_object_unref (css);
-
-	self->text_buffer = gtk_text_view_get_buffer (GTK_TEXT_VIEW (self->text_view));
-	gtk_container_add (GTK_CONTAINER (self->text_scroll), self->text_view);
-	gtk_widget_show (self->text_view);
-	gtk_stack_add_named (GTK_STACK (self->stack), self->text_scroll, "text");
-	gtk_widget_show (self->text_scroll);
+	/* Text page — shared NemoPagedViewer (handles files of any size) */
+	self->paged_viewer = nemo_paged_viewer_new ();
+	gtk_stack_add_named (GTK_STACK (self->stack),
+			     GTK_WIDGET (self->paged_viewer), "text");
+	gtk_widget_show (GTK_WIDGET (self->paged_viewer));
 
 	/* Info page (icon only, for non-previewable files) */
 	info_box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);

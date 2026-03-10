@@ -76,6 +76,7 @@
             <separator/>
 			<menuitem name="Show Hide Extra Pane" action="Show Hide Extra Pane"/>
 			<menuitem name="Show Hide Preview Pane" action="Show Hide Preview Pane"/>
+			<menuitem name="Quick Preview" action="Quick Preview"/>
             <menuitem name="Edit Location" action="Edit Location"/>
 		</placeholder>
 		<separator/>

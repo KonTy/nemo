@@ -156,6 +156,25 @@ These features were developed for smplos-nemo and are not expected to be accepte
   - `--select` / `-s`: Open parent directory and highlight a specific file
   - Reason for smplos-only: Compositor integration features
 
+- **F3 Quick Preview** (`release`)
+  - Double Commander-style F3 instant file viewer
+  - Supports text, images (including animated GIFs), audio/video (GStreamer), and hex dump
+  - Directory analysis: F3 on a folder shows Pareto bar chart + ranked biggest-files list
+  - Paged text/hex viewer using pread() + LRU cache (handles multi-GB files with ~512 KB resident)
+  - Escape to dismiss, focus returns to Nemo
+  - Singleton window reused across invocations
+  - Split view moved to Ctrl+F3
+  - Modular architecture: NemoImageViewer, NemoPagedViewer, NemoPreviewUtils shared between sidebar pane and quick preview
+  - Reason for smplos-only: Power-user feature inspired by Double Commander / Midnight Commander
+
+- **Shared Directory Analyzer Widget** (`release`)
+  - Reusable NemoDirAnalyzer widget for directory-size Pareto analysis
+  - Used by both the Overview page (per-volume) and F3 Quick Preview (per-folder)
+  - Vertical bar chart + ranked list with clickable paths for navigation
+  - Background async scan with "scan-finished" signal
+  - Shared colour palette and scan engine extracted from Overview
+  - Reason for smplos-only: Extension of the overview page feature
+
 - **Archive Browsing** (`feature/archive-support`)
   - Double-click archives to browse contents like folders
   - Transparent FUSE-based mounting (fuse-zip, archivemount)
@@ -194,6 +213,13 @@ These features were developed for smplos-nemo and are not expected to be accepte
 
 ## Version History
 ### smplos-nemo v1.2.0 (March 2026)
+- **F3 Quick Preview**: Double Commander-style instant file viewer (text, image, media, hex, directory)
+  - Paged text/hex viewer with pread() + LRU cache — handles multi-GB files
+  - Directory analysis with Pareto bar chart + ranked biggest-files list
+  - Modular architecture: NemoImageViewer, NemoPagedViewer, NemoPreviewUtils
+- **Shared NemoDirAnalyzer widget** for directory-size analysis (used by Overview + F3)
+  - Overview page refactored — ~350 lines of duplicated code removed
+- **Keybinding changes**: F3 → Quick Preview, Ctrl+F3 → Split View
 - Verify after copy/move: SHA-256 verification checkbox in F5/F6 dialogs
 - Per-pane location labels: compact path display above each pane in dual-pane mode
 - New GSettings key: show-dual-pane-location-labels (default: true)
