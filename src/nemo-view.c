@@ -6853,10 +6853,21 @@ action_copy_to_next_pane_callback (GtkAction *action, gpointer callback_data)
 	                                 "%s", primary);
 	gtk_dialog_set_default_response (GTK_DIALOG (dialog), GTK_RESPONSE_OK);
 
+	/* Verify checkbox — remembers state across invocations */
+	static gboolean copy_verify_checked = FALSE;
+	GtkWidget *verify_check = gtk_check_button_new_with_label (_("Verify after copy"));
+	gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON (verify_check), copy_verify_checked);
+	gtk_widget_set_tooltip_text (verify_check, _("Re-read files from disk and compare SHA-256 checksums to confirm a successful copy"));
+	gtk_box_pack_start (GTK_BOX (gtk_dialog_get_content_area (GTK_DIALOG (dialog))),
+	                    verify_check, FALSE, FALSE, 6);
+	gtk_widget_show (verify_check);
+
 	response = gtk_dialog_run (GTK_DIALOG (dialog));
+	copy_verify_checked = gtk_toggle_button_get_active (GTK_TOGGLE_BUTTON (verify_check));
 	gtk_widget_destroy (dialog);
 
 	if (response == GTK_RESPONSE_OK) {
+		nemo_file_operations_set_verify_copies (copy_verify_checked);
 		move_copy_selection_to_location (view, GDK_ACTION_COPY, dest_location);
 	}
 
@@ -6916,10 +6927,21 @@ action_move_to_next_pane_callback (GtkAction *action, gpointer callback_data)
 	                                 "%s", primary);
 	gtk_dialog_set_default_response (GTK_DIALOG (dialog), GTK_RESPONSE_OK);
 
+	/* Verify checkbox — remembers state across invocations */
+	static gboolean move_verify_checked = FALSE;
+	GtkWidget *move_verify_check = gtk_check_button_new_with_label (_("Verify after move"));
+	gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON (move_verify_check), move_verify_checked);
+	gtk_widget_set_tooltip_text (move_verify_check, _("Re-read files from disk and compare SHA-256 checksums to confirm a successful move"));
+	gtk_box_pack_start (GTK_BOX (gtk_dialog_get_content_area (GTK_DIALOG (dialog))),
+	                    move_verify_check, FALSE, FALSE, 6);
+	gtk_widget_show (move_verify_check);
+
 	response = gtk_dialog_run (GTK_DIALOG (dialog));
+	move_verify_checked = gtk_toggle_button_get_active (GTK_TOGGLE_BUTTON (move_verify_check));
 	gtk_widget_destroy (dialog);
 
 	if (response == GTK_RESPONSE_OK) {
+		nemo_file_operations_set_verify_copies (move_verify_checked);
 		move_copy_selection_to_location (view, GDK_ACTION_MOVE, dest_location);
 	}
 

@@ -122,7 +122,12 @@ typedef struct {
 	gchar *target_name;
 	NemoCopyCallback  done_callback;
 	gpointer done_callback_data;
+	gboolean verify_after_copy;
 } CopyMoveJob;
+
+/* Static flag: when TRUE the next copy/move job will verify checksums.
+ * Set from the UI thread before starting the operation, consumed once. */
+static gboolean _nemo_next_copy_verify = FALSE;
 
 typedef struct {
 	CommonJob common;
@@ -4255,6 +4260,110 @@ remove_target_recursively (CommonJob *job,
  * See: https://github.com/linuxmint/nemo/issues/3710 */
 #define FLUSH_CHUNK_SIZE (32 * 1024 * 1024)  /* 32 MiB */
 
+/* Buffer size for verification reads */
+#define VERIFY_BUF_SIZE (1024 * 1024)  /* 1 MiB */
+
+void
+nemo_file_operations_set_verify_copies (gboolean verify)
+{
+	_nemo_next_copy_verify = verify;
+}
+
+/* Compute SHA-256 of a file, bypassing page cache.
+ * Opens with O_RDONLY, calls posix_fadvise(DONTNEED) before AND after
+ * the read loop so we re-read from physical media, not cached pages. */
+static gchar *
+checksum_file_bypass_cache (GFile *file, GCancellable *cancellable)
+{
+	char *path;
+	int fd;
+	GChecksum *cksum;
+	guchar *buf;
+	gssize nread;
+	gchar *result;
+
+	path = g_file_get_path (file);
+	if (path == NULL)
+		return NULL;
+
+	fd = open (path, O_RDONLY);
+	g_free (path);
+	if (fd < 0)
+		return NULL;
+
+	/* Drop any cached pages so the kernel reads from disk */
+	posix_fadvise (fd, 0, 0, POSIX_FADV_DONTNEED);
+
+	cksum = g_checksum_new (G_CHECKSUM_SHA256);
+	buf = g_malloc (VERIFY_BUF_SIZE);
+
+	while ((nread = read (fd, buf, VERIFY_BUF_SIZE)) > 0) {
+		g_checksum_update (cksum, buf, nread);
+		if (cancellable && g_cancellable_is_cancelled (cancellable))
+			break;
+	}
+
+	/* Drop again so we don't pollute the cache with verification data */
+	posix_fadvise (fd, 0, 0, POSIX_FADV_DONTNEED);
+	close (fd);
+	g_free (buf);
+
+	if (nread < 0 || (cancellable && g_cancellable_is_cancelled (cancellable))) {
+		g_checksum_free (cksum);
+		return NULL;
+	}
+
+	result = g_strdup (g_checksum_get_string (cksum));
+	g_checksum_free (cksum);
+	return result;
+}
+
+/* Verify a copied file by comparing SHA-256 checksums.
+ * The destination is fsync'd first to ensure data is on disk. */
+static gboolean
+verify_copied_file (CommonJob *job, GFile *src, GFile *dest)
+{
+	char *dest_path;
+	int fd;
+	gchar *src_sum, *dest_sum;
+	gboolean match;
+
+	/* fsync the destination to flush to physical media */
+	dest_path = g_file_get_path (dest);
+	if (dest_path) {
+		fd = open (dest_path, O_RDONLY);
+		if (fd >= 0) {
+			fsync (fd);
+			close (fd);
+		}
+		g_free (dest_path);
+	}
+
+	src_sum  = checksum_file_bypass_cache (src,  job->cancellable);
+	dest_sum = checksum_file_bypass_cache (dest, job->cancellable);
+
+	if (src_sum == NULL || dest_sum == NULL) {
+		/* Could not checksum — treat as mismatch */
+		g_warning ("verify-copy: could not checksum %s",
+		           src_sum == NULL ? g_file_peek_path (src) : g_file_peek_path (dest));
+		g_free (src_sum);
+		g_free (dest_sum);
+		return FALSE;
+	}
+
+	match = (g_strcmp0 (src_sum, dest_sum) == 0);
+
+	if (!match) {
+		g_warning ("verify-copy: CHECKSUM MISMATCH  src=%s  dest=%s  (%s vs %s)",
+		           g_file_peek_path (src), g_file_peek_path (dest),
+		           src_sum, dest_sum);
+	}
+
+	g_free (src_sum);
+	g_free (dest_sum);
+	return match;
+}
+
 typedef struct {
 	CopyMoveJob *job;
 	goffset last_size;
@@ -4716,6 +4825,38 @@ copy_move_file (CopyMoveJob *copy_job,
 			g_file_copy_attributes (src, dest,
 			                        flags | G_FILE_COPY_ALL_METADATA,
 			                        job->cancellable, NULL);
+		}
+
+		/* Verify after copy: compare SHA-256 checksums, reading from disk
+		 * (page cache bypassed via posix_fadvise DONTNEED).
+		 * For moves across filesystems GIO does copy+delete, so src
+		 * is still available at this point. */
+		if (copy_job->verify_after_copy && !job_aborted (job)) {
+			GFileType ft = g_file_query_file_type (src, G_FILE_QUERY_INFO_NOFOLLOW_SYMLINKS, NULL);
+			if (ft == G_FILE_TYPE_REGULAR) {
+				if (!verify_copied_file (job, src, dest)) {
+					char *src_name = g_file_get_basename (src);
+					char *primary_msg, *secondary_msg;
+					int verify_response;
+
+					primary_msg = g_strdup_printf (_("Verification failed for \"%s\""), src_name);
+					secondary_msg = g_strdup_printf (
+						_("The SHA-256 checksum of the copy does not match the original. "
+						  "The file may be corrupted."));
+
+					verify_response = run_warning (
+						job, primary_msg, secondary_msg, NULL,
+						FALSE,
+						GTK_STOCK_CANCEL, SKIP,
+						NULL);
+
+					g_free (src_name);
+
+					if (verify_response == 0 || verify_response == GTK_RESPONSE_DELETE_EVENT) {
+						abort_job (job);
+					}
+				}
+			}
 		}
 
 		transfer_info->num_files ++;
@@ -5215,6 +5356,8 @@ nemo_file_operations_copy (GList *files,
 	job->desktop_location = nemo_get_desktop_location ();
 	job->done_callback = done_callback;
 	job->done_callback_data = done_callback_data;
+	job->verify_after_copy = _nemo_next_copy_verify;
+	_nemo_next_copy_verify = FALSE;
 	job->files = eel_g_object_list_copy (files);
 	job->destination = g_object_ref (target_dir);
 	if (relative_item_points != NULL &&
@@ -5796,6 +5939,8 @@ nemo_file_operations_move (GList *files,
     job->desktop_location = nemo_get_desktop_location ();
 	job->done_callback = done_callback;
 	job->done_callback_data = done_callback_data;
+	job->verify_after_copy = _nemo_next_copy_verify;
+	_nemo_next_copy_verify = FALSE;
 	job->files = eel_g_object_list_copy (files);
 	job->destination = g_object_ref (target_dir);
 	if (relative_item_points != NULL &&

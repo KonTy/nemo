@@ -148,5 +148,7 @@ void nemo_file_mark_desktop_file_trusted (GFile           *file,
 					      NemoOpCallback done_callback,
 					      gpointer          done_callback_data);
 
+void nemo_file_operations_set_verify_copies (gboolean verify);
+
 
 #endif /* NEMO_FILE_OPERATIONS_H */
