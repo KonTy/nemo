@@ -34,6 +34,9 @@ Double Commander-style instant file viewer:
 - Text, image (including animated GIFs and camera RAW: DNG, ARW, CR2, NEF…), audio/video (GStreamer), and hex dump modes
 - Directory analysis: F3 on a folder shows Pareto bar chart + ranked biggest-files list
 - Paged text/hex viewer using `pread()` + LRU cache — handles multi-GB files with ~512 KB resident
+- **Timecode display**: live `hh:mm:ss:ff` timestamp (monospace) with auto-detected framerate
+- **Frame stepping**: `<` (comma) steps back one frame, `>` (period) steps forward — pauses playback automatically, like YouTube
+- **Keyboard media controls**: Space = play/pause, M = mute/unmute, F = fullscreen, ← → = navigate files
 - Escape to dismiss; singleton window reused across invocations
 - Split view moved to Ctrl+F3
 - Modular architecture: `NemoImageViewer`, `NemoPagedViewer`, `NemoPreviewUtils` shared between sidebar pane and quick preview
@@ -65,6 +68,9 @@ Double Commander-style instant file viewer:
 - Live image/video preview with EXIF metadata display (works on both X11 and Wayland)
 - GPS map display for geotagged photos (OpenStreetMap)
 - Adjustable preview width (Ctrl+[ / Ctrl+])
+- **Media keyboard shortcuts**: Ctrl+M = mute/unmute, Ctrl+Space = play/pause
+- Toggle metadata details panel with Shift+Alt+F3
+- All preview pane shortcuts are configurable via `org.nemo.keybindings`
 
 ### Disk Usage Overview
 
@@ -100,7 +106,7 @@ Double Commander-style instant file viewer:
 
 ### Other Enhancements
 
-- **Configurable Keyboard Shortcuts** — edit all keybindings via preferences
+- **Configurable Keyboard Shortcuts** — edit all keybindings via preferences, including media controls (`toggle-mute`, `toggle-play`)
 - **Substring Search** — match anywhere in filename, not just prefix
 - **Tab-based Pane Splitting** — Tab to switch focus, Ctrl+N for new split pane
 - **Copy Path** — right-click "Copy Path" to clipboard

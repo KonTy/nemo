@@ -13,6 +13,9 @@ nemo-smpl
 | F3 Quick Preview (text/image/media/hex/dir) | ❌ | ✅ |
 | Camera RAW preview (DNG, ARW, CR2, NEF…) | ❌ | ✅ |
 | Wayland video preview (sidebar + F3) | ❌ | ✅ |
+| Timecode display (hh:mm:ss:ff) in F3 preview | ❌ | ✅ |
+| Frame-by-frame stepping (< >) in F3 preview | ❌ | ✅ |
+| Media keyboard shortcuts (play/mute) | ❌ | ✅ |
 | Verify after copy (SHA-256) | ❌ | ✅ |
 | Preview Pane (Alt+F3) with GPS map | ❌ | ✅ |
 | Disk Usage Overview (Pareto charts) | ❌ | ✅ |
@@ -62,11 +65,23 @@ See [INSTALLATION.md](INSTALLATION.md) for detailed instructions, build dependen
 | **F3** | Quick Preview (instant file viewer) |
 | **Alt+F3** | Toggle Preview Pane |
 | **Ctrl+F3** | Toggle Split View |
+| **Shift+Alt+F3** | Toggle Preview Pane details |
 | **Ctrl+Shift+K** | Edit keyboard shortcuts |
 | **F5** | Copy dialog |
 | **F6** | Move dialog |
 | **Ctrl+H** | Show/hide hidden files |
 | **Ctrl+[** / **Ctrl+]** | Shrink / grow Preview Pane |
+| **Ctrl+M** | Mute / unmute preview audio |
+| **Ctrl+Space** | Play / pause preview pane audio/video |
+| | |
+| **In F3 Quick Preview dialog:** | |
+| **Space** | Play / pause |
+| **M** | Mute / unmute |
+| **< (comma)** | Step back one frame |
+| **> (period)** | Step forward one frame |
+| **F** | Toggle fullscreen |
+| **←** / **→** | Previous / next file |
+| **Esc** | Dismiss |
 
 ## Upstream Relationship
 
