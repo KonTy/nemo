@@ -82,9 +82,11 @@ struct _NemoQuickPreview {
 	GtkWidget   *play_btn;
 	GtkWidget   *mute_btn;
 	GtkWidget   *seek_scale;
+	GtkWidget   *time_label;
 	guint        seek_update_id;
 	gboolean     seek_lock;
 	gboolean     video_muted;
+	double       video_fps;
 
 	/* Frame rendering (appsink → cairo) */
 	cairo_surface_t *frame_surface;
@@ -178,6 +180,38 @@ on_key_press (GtkWidget *widget, GdkEventKey *event, gpointer data)
 		else
 			gtk_window_fullscreen (GTK_WINDOW (self));
 		return GDK_EVENT_STOP;
+#ifdef HAVE_GSTREAMER
+	case GDK_KEY_comma:   /* < — previous frame */
+	case GDK_KEY_period:  /* > — next frame */
+		if (self->mode == PREVIEW_MEDIA && self->pipeline != NULL) {
+			GstState state;
+			gint64 pos;
+			gint64 step;
+
+			/* Pause first if playing */
+			gst_element_get_state (self->pipeline, &state, NULL, 0);
+			if (state == GST_STATE_PLAYING) {
+				gst_element_set_state (self->pipeline, GST_STATE_PAUSED);
+				gtk_button_set_image (GTK_BUTTON (self->play_btn),
+					gtk_image_new_from_icon_name (
+						"media-playback-start-symbolic",
+						GTK_ICON_SIZE_SMALL_TOOLBAR));
+			}
+
+			step = (gint64)(GST_SECOND / self->video_fps);
+			if (gst_element_query_position (self->pipeline,
+			                                GST_FORMAT_TIME, &pos)) {
+				gint64 new_pos = (event->keyval == GDK_KEY_period)
+					? pos + step : pos - step;
+				if (new_pos < 0) new_pos = 0;
+				gst_element_seek_simple (self->pipeline,
+					GST_FORMAT_TIME,
+					GST_SEEK_FLAG_FLUSH | GST_SEEK_FLAG_ACCURATE,
+					new_pos);
+			}
+		}
+		return GDK_EVENT_STOP;
+#endif
 	default:
 		break;
 	}
@@ -265,9 +299,11 @@ nemo_quick_preview_init (NemoQuickPreview *self)
 	self->play_btn = NULL;
 	self->mute_btn = NULL;
 	self->seek_scale = NULL;
+	self->time_label = NULL;
 	self->seek_update_id = 0;
 	self->seek_lock = FALSE;
 	self->video_muted = TRUE;
+	self->video_fps = 25.0;
 
 	/* Initialise GStreamer early (safe to call multiple times) */
 	if (!gst_init_check (NULL, NULL, NULL)) {
@@ -395,6 +431,18 @@ nemo_quick_preview_init (NemoQuickPreview *self)
 		                  G_CALLBACK (mute_clicked_cb), self);
 		gtk_box_pack_start (GTK_BOX (vctrl), self->mute_btn, FALSE, FALSE, 0);
 		gtk_widget_show (self->mute_btn);
+
+		self->time_label = gtk_label_new ("00:00:00:00");
+		gtk_widget_set_margin_start (self->time_label, 8);
+		{
+			PangoAttrList *attrs = pango_attr_list_new ();
+			pango_attr_list_insert (attrs,
+				pango_attr_family_new ("Monospace"));
+			gtk_label_set_attributes (GTK_LABEL (self->time_label), attrs);
+			pango_attr_list_unref (attrs);
+		}
+		gtk_box_pack_start (GTK_BOX (vctrl), self->time_label, FALSE, FALSE, 0);
+		gtk_widget_show (self->time_label);
 
 		gtk_box_pack_end (GTK_BOX (self->media_box), vctrl, FALSE, FALSE, 0);
 		gtk_widget_show (vctrl);
@@ -949,6 +997,21 @@ seek_position_update_cb (gpointer data)
 		                     (gdouble) pos / (gdouble) dur);
 	}
 
+	/* Update timestamp label: hh:mm:ss:ff */
+	{
+		double fps = self->video_fps;
+		gint total_secs = (gint)(pos / GST_SECOND);
+		gint h  = total_secs / 3600;
+		gint m  = (total_secs % 3600) / 60;
+		gint s  = total_secs % 60;
+		gint64 remainder_ns = pos - (gint64)total_secs * GST_SECOND;
+		gint ff = (gint)(remainder_ns * fps / GST_SECOND);
+		gchar buf[32];
+
+		g_snprintf (buf, sizeof (buf), "%02d:%02d:%02d:%02d", h, m, s, ff);
+		gtk_label_set_text (GTK_LABEL (self->time_label), buf);
+	}
+
 	return G_SOURCE_CONTINUE;
 }
 
@@ -1108,7 +1171,29 @@ preview_show_media (NemoQuickPreview *self, GFile *file)
 	if (self->seek_update_id != 0) {
 		g_source_remove (self->seek_update_id);
 	}
-	self->seek_update_id = g_timeout_add (250, seek_position_update_cb, self);
+	self->seek_update_id = g_timeout_add (40, seek_position_update_cb, self);
+
+	/* Detect framerate from the first video stream */
+	self->video_fps = 25.0;  /* default fallback */
+	{
+		GstPad *pad = NULL;
+		g_signal_emit_by_name (self->pipeline, "get-video-pad", 0, &pad);
+		if (pad != NULL) {
+			GstCaps *caps = gst_pad_get_current_caps (pad);
+			if (caps == NULL)
+				caps = gst_pad_query_caps (pad, NULL);
+			if (caps != NULL && gst_caps_get_size (caps) > 0) {
+				const GstStructure *s = gst_caps_get_structure (caps, 0);
+				gint num = 0, den = 1;
+				if (gst_structure_get_fraction (s, "framerate", &num, &den) && den > 0 && num > 0) {
+					self->video_fps = (double)num / (double)den;
+				}
+			}
+			if (caps != NULL)
+				gst_caps_unref (caps);
+			gst_object_unref (pad);
+		}
+	}
 
 	/* Start PAUSED — user clicks Play to begin */
 	gst_element_set_state (self->pipeline, GST_STATE_PAUSED);
