@@ -1291,7 +1291,7 @@ nemo_window_key_press_event (GtkWidget *widget,
 		}
 	}
 
-	/* Ctrl+Shift+M toggles mute on the preview pane (configurable via
+	/* Ctrl+M toggles mute on the preview pane (configurable via
 	 * toggle-mute keybinding). */
 	if (nemo_keybinding_settings != NULL) {
 		g_autofree gchar *mute_accel = g_settings_get_string (nemo_keybinding_settings, "toggle-mute");

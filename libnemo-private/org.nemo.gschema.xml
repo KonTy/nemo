@@ -998,7 +998,7 @@
       <summary>Quick file preview</summary>
     </key>
     <key name="toggle-mute" type="s">
-      <default>'&lt;Control&gt;&lt;Shift&gt;m'</default>
+      <default>'&lt;Control&gt;m'</default>
       <summary>Mute/unmute preview audio</summary>
     </key>
     <key name="toggle-play" type="s">
@@ -1122,7 +1122,7 @@
       <summary>Rename selected item</summary>
     </key>
     <key name="create-link" type="s">
-      <default>'&lt;Control&gt;m'</default>
+      <default>'&lt;Control&gt;&lt;Shift&gt;m'</default>
       <summary>Create symbolic link</summary>
     </key>
     <key name="pin-file" type="s">

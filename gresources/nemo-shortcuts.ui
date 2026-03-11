@@ -285,7 +285,7 @@
               <object class="GtkShortcutsShortcut">
                 <property name="visible">True</property>
                 <property name="title" translatable="yes" context="shortcut window">Mute/Unmute preview audio</property>
-                <property name="accelerator">&lt;Primary&gt;&lt;Shift&gt;M</property>
+                <property name="accelerator">&lt;Primary&gt;M</property>
               </object>
             </child>
             <child>
