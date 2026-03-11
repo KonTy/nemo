@@ -28,6 +28,44 @@ nemo_preview_mime_is_image (const gchar *mime)
 }
 
 gboolean
+nemo_preview_mime_is_raw_image (const gchar *mime)
+{
+	if (mime == NULL)
+		return FALSE;
+
+	/* Camera RAW formats that gdk-pixbuf cannot decode natively */
+	static const char *raw_types[] = {
+		"image/x-sony-arw",
+		"image/x-adobe-dng",
+		"image/x-canon-cr2",
+		"image/x-canon-cr3",
+		"image/x-canon-crw",
+		"image/x-nikon-nef",
+		"image/x-nikon-nrw",
+		"image/x-olympus-orf",
+		"image/x-pentax-pef",
+		"image/x-panasonic-rw2",
+		"image/x-panasonic-raw",
+		"image/x-fuji-raf",
+		"image/x-samsung-srw",
+		"image/x-sigma-x3f",
+		"image/x-minolta-mrw",
+		"image/x-kodak-dcr",
+		"image/x-kodak-kdc",
+		"image/x-raw",
+		"image/x-dcraw",
+		NULL
+	};
+
+	for (int i = 0; raw_types[i] != NULL; i++) {
+		if (g_strcmp0 (mime, raw_types[i]) == 0)
+			return TRUE;
+	}
+
+	return FALSE;
+}
+
+gboolean
 nemo_preview_mime_is_text (const gchar *mime)
 {
 	if (mime == NULL)

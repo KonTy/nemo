@@ -23,6 +23,8 @@
 #mesondefine HAVE_GTK_LAYER_SHELL
 // Define to enable GStreamer video preview
 #mesondefine HAVE_GSTREAMER
+// Define to enable libraw camera RAW image support
+#mesondefine HAVE_LIBRAW
 
 
 

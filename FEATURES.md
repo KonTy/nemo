@@ -1,6 +1,6 @@
 # nemo-smpl — Features & Release Notes
 
-**Current Version:** v1.3.0  
+**Current Version:** v1.4.0  
 **Release Date:** March 10, 2026
 
 ---
@@ -31,7 +31,7 @@ These features are developed for nemo-smpl and are not expected to be accepted u
 
 Double Commander-style instant file viewer:
 
-- Text, image (including animated GIFs), audio/video (GStreamer), and hex dump modes
+- Text, image (including animated GIFs and camera RAW: DNG, ARW, CR2, NEF…), audio/video (GStreamer), and hex dump modes
 - Directory analysis: F3 on a folder shows Pareto bar chart + ranked biggest-files list
 - Paged text/hex viewer using `pread()` + LRU cache — handles multi-GB files with ~512 KB resident
 - Escape to dismiss; singleton window reused across invocations
@@ -62,7 +62,7 @@ Double Commander-style instant file viewer:
 
 ### Preview Pane (Alt+F3)
 
-- Live image/video preview with EXIF metadata display
+- Live image/video preview with EXIF metadata display (works on both X11 and Wayland)
 - GPS map display for geotagged photos (OpenStreetMap)
 - Adjustable preview width (Ctrl+[ / Ctrl+])
 
@@ -110,6 +110,15 @@ Double Commander-style instant file viewer:
 ---
 
 ## Version History
+
+### v1.4.0 (March 2026)
+
+- **Wayland-compatible video preview**: Replaced X11 overlay (`xvimagesink`) with `appsink` + Cairo rendering in both F3 Quick Preview and sidebar Preview Pane — video now works on X11 and Wayland equally
+- **Camera RAW image support**: DNG, ARW, CR2, CR3, NEF, ORF, PEF, RAF, RW2, and 10+ more RAW formats rendered via libraw in both sidebar and F3 preview
+- **New dependency**: optional `libraw` (≥0.20) for RAW image decoding; `gstreamer-app-1.0` for appsink
+- Removed all X11-specific video code (`videooverlay.h`, `gdkx.h`, `GDK_WINDOW_XID`, `bus_sync_handler`)
+- Video rendering uses mutex-protected `cairo_surface_t` frame buffer with aspect-ratio letterboxing
+- Cleaned up debug logging from GStreamer pipeline
 
 ### v1.3.0 (March 2026)
 

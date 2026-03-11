@@ -30,6 +30,7 @@
 #include "nemo-paged-viewer.h"
 
 #include <math.h>
+#include <string.h>
 #include <glib/gi18n.h>
 #include <gio/gio.h>
 #include <gdk-pixbuf/gdk-pixbuf.h>
@@ -43,10 +44,8 @@
 
 #ifdef HAVE_GSTREAMER
 #include <gst/gst.h>
-#include <gst/video/videooverlay.h>
-#ifdef GDK_WINDOWING_X11
-#include <gdk/gdkx.h>
-#endif
+#include <gst/video/video.h>
+#include <gst/app/gstappsink.h>
 #endif
 
 #define GPS_MAP_SIZE          150
@@ -75,7 +74,10 @@ struct _NemoPreviewPane
 	GstElement	*pipeline;
 	guint		 bus_watch_id;
 	guint		 seek_update_id;
-	guintptr	 video_xid;
+	cairo_surface_t	*frame_surface;
+	GMutex		 frame_mutex;
+	gint		 video_width;
+	gint		 video_height;
 	gboolean	 video_muted;
 	gboolean	 seek_lock;
 #endif
@@ -125,28 +127,53 @@ static void
 load_image_preview (NemoPreviewPane *self, NemoFile *file)
 {
 	GFile *location;
-	GFileInputStream *stream;
-	GError *error = NULL;
 	gboolean fit;
-
-	location = nemo_file_get_location (file);
-	stream = g_file_read (location, NULL, &error);
-	g_object_unref (location);
-
-	if (error != NULL) {
-		g_warning ("Preview pane: cannot open file for reading: %s",
-			   error->message);
-		g_error_free (error);
-		return;
-	}
+	char *mime;
 
 	fit = g_settings_get_boolean (nemo_preview_pane_preferences,
 				      "fit-to-pane");
 	nemo_image_viewer_set_fit (self->image_viewer, fit);
 	nemo_image_viewer_set_show_controls (self->image_viewer, TRUE);
-	nemo_image_viewer_load_stream_async (self->image_viewer,
-					     G_INPUT_STREAM (stream),
-					     self->cancellable);
+
+	location = nemo_file_get_location (file);
+	mime = nemo_file_get_mime_type (file);
+
+	/* For camera RAW files (DNG, ARW, CR2, NEF, etc.), use the
+	 * file-path loader so the libraw fallback can kick in. */
+	if (nemo_preview_mime_is_raw_image (mime)) {
+		char *path = g_file_get_path (location);
+
+		if (path != NULL) {
+			GError *error = NULL;
+			if (!nemo_image_viewer_load_file (self->image_viewer,
+			                                  path, &error)) {
+				g_warning ("Preview pane: could not load RAW image: %s",
+				           error ? error->message : "unknown");
+				g_clear_error (&error);
+			}
+			g_free (path);
+		}
+	} else {
+		GFileInputStream *stream;
+		GError *error = NULL;
+
+		stream = g_file_read (location, NULL, &error);
+		if (error != NULL) {
+			g_warning ("Preview pane: cannot open file for reading: %s",
+				   error->message);
+			g_error_free (error);
+			g_free (mime);
+			g_object_unref (location);
+			return;
+		}
+
+		nemo_image_viewer_load_stream_async (self->image_viewer,
+						     G_INPUT_STREAM (stream),
+						     self->cancellable);
+	}
+
+	g_free (mime);
+	g_object_unref (location);
 
 	gtk_stack_set_visible_child_name (GTK_STACK (self->stack), "image");
 }
@@ -805,7 +832,15 @@ stop_video (NemoPreviewPane *self)
 		self->pipeline = NULL;
 	}
 
-	self->video_xid = 0;
+	g_mutex_lock (&self->frame_mutex);
+	if (self->frame_surface != NULL) {
+		cairo_surface_destroy (self->frame_surface);
+		self->frame_surface = NULL;
+	}
+	self->video_width = 0;
+	self->video_height = 0;
+	g_mutex_unlock (&self->frame_mutex);
+
 	self->seek_lock = FALSE;
 }
 
@@ -873,30 +908,73 @@ video_bus_message_cb (GstBus     *bus,
 	return TRUE;
 }
 
-/*
- * Sync bus handler — runs on the streaming thread.  We only handle the
- * prepare-window-handle message here; everything else goes to the
- * default async handler.
- */
-static GstBusSyncReply
-video_bus_sync_handler (GstBus     *bus,
-		       GstMessage *msg,
-		       gpointer    user_data)
+/* ---- appsink new-sample callback (called on streaming thread) ---- */
+static GstFlowReturn
+new_sample_cb (GstAppSink *sink, gpointer user_data)
 {
-	NemoPreviewPane *self = user_data;
+	NemoPreviewPane *self = NEMO_PREVIEW_PANE (user_data);
+	GstSample *sample;
+	GstBuffer *buffer;
+	GstCaps *caps;
+	GstVideoInfo vinfo;
+	GstMapInfo map;
+	cairo_surface_t *surface;
+	int w, h, stride;
+	const guint8 *src;
+	guint8 *dst;
+	int i;
 
-	if (!gst_is_video_overlay_prepare_window_handle_message (msg)) {
-		return GST_BUS_PASS;
+	sample = gst_app_sink_pull_sample (sink);
+	if (sample == NULL)
+		return GST_FLOW_OK;
+
+	buffer = gst_sample_get_buffer (sample);
+	caps = gst_sample_get_caps (sample);
+	if (buffer == NULL || caps == NULL) {
+		gst_sample_unref (sample);
+		return GST_FLOW_OK;
 	}
 
-	if (self->video_xid != 0) {
-		gst_video_overlay_set_window_handle (
-			GST_VIDEO_OVERLAY (self->pipeline),
-			self->video_xid);
+	if (!gst_video_info_from_caps (&vinfo, caps)) {
+		gst_sample_unref (sample);
+		return GST_FLOW_OK;
 	}
 
-	gst_message_unref (msg);
-	return GST_BUS_DROP;
+	w = GST_VIDEO_INFO_WIDTH (&vinfo);
+	h = GST_VIDEO_INFO_HEIGHT (&vinfo);
+
+	if (!gst_buffer_map (buffer, &map, GST_MAP_READ)) {
+		gst_sample_unref (sample);
+		return GST_FLOW_OK;
+	}
+
+	surface = cairo_image_surface_create (CAIRO_FORMAT_RGB24, w, h);
+	stride = cairo_image_surface_get_stride (surface);
+	dst = cairo_image_surface_get_data (surface);
+	src = map.data;
+
+	for (i = 0; i < h; i++) {
+		memcpy (dst + i * stride,
+		        src + i * (int) GST_VIDEO_INFO_PLANE_STRIDE (&vinfo, 0),
+		        w * 4);
+	}
+
+	cairo_surface_mark_dirty (surface);
+	gst_buffer_unmap (buffer, &map);
+	gst_sample_unref (sample);
+
+	g_mutex_lock (&self->frame_mutex);
+	if (self->frame_surface != NULL)
+		cairo_surface_destroy (self->frame_surface);
+	self->frame_surface = surface;
+	self->video_width = w;
+	self->video_height = h;
+	g_mutex_unlock (&self->frame_mutex);
+
+	if (self->video_area != NULL)
+		gtk_widget_queue_draw (self->video_area);
+
+	return GST_FLOW_OK;
 }
 
 static gboolean
@@ -905,29 +983,33 @@ video_area_draw_cb (GtkWidget *widget,
 		    gpointer   user_data)
 {
 	NemoPreviewPane *self = NEMO_PREVIEW_PANE (user_data);
+	GtkAllocation alloc;
 
-	if (self->pipeline != NULL) {
-		/* Ask GStreamer to repaint the current frame so we don't
-		 * get a black flash when GTK redraws the widget. */
-		gst_video_overlay_expose (
-			GST_VIDEO_OVERLAY (self->pipeline));
-	} else {
-		cairo_set_source_rgb (cr, 0.0, 0.0, 0.0);
+	gtk_widget_get_allocation (widget, &alloc);
+
+	/* Always paint black background */
+	cairo_set_source_rgb (cr, 0.0, 0.0, 0.0);
+	cairo_paint (cr);
+
+	g_mutex_lock (&self->frame_mutex);
+	if (self->frame_surface != NULL && self->video_width > 0 && self->video_height > 0) {
+		double sx = (double) alloc.width  / (double) self->video_width;
+		double sy = (double) alloc.height / (double) self->video_height;
+		double scale = (sx < sy) ? sx : sy;
+		double dx = (alloc.width  - self->video_width  * scale) / 2.0;
+		double dy = (alloc.height - self->video_height * scale) / 2.0;
+
+		cairo_save (cr);
+		cairo_translate (cr, dx, dy);
+		cairo_scale (cr, scale, scale);
+		cairo_set_source_surface (cr, self->frame_surface, 0, 0);
+		cairo_pattern_set_filter (cairo_get_source (cr), CAIRO_FILTER_BILINEAR);
 		cairo_paint (cr);
+		cairo_restore (cr);
 	}
+	g_mutex_unlock (&self->frame_mutex);
 
 	return TRUE;
-}
-
-static void
-video_area_realize_cb (GtkWidget *widget, gpointer user_data)
-{
-	GdkWindow *window;
-
-	window = gtk_widget_get_window (widget);
-	if (window != NULL) {
-		gdk_window_ensure_native (window);
-	}
 }
 
 static void
@@ -1089,20 +1171,6 @@ load_media_preview (NemoPreviewPane *self,
 		}
 	}
 
-	/* Video overlay requires an X11 display; audio works anywhere */
-	if (!is_audio) {
-#ifdef GDK_WINDOWING_X11
-		if (!GDK_IS_X11_DISPLAY (
-			gtk_widget_get_display (GTK_WIDGET (self)))) {
-			show_info_preview (self, file);
-			return;
-		}
-#else
-		show_info_preview (self, file);
-		return;
-#endif
-	}
-
 	self->pipeline = gst_element_factory_make ("playbin",
 						   "preview-player");
 	if (self->pipeline == NULL) {
@@ -1141,27 +1209,32 @@ load_media_preview (NemoPreviewPane *self,
 				GTK_ICON_SIZE_DIALOG);
 		}
 	} else {
-		GdkWindow *window;
+		GstElement *appsink;
+		GstCaps *caps;
 
 		gtk_widget_show (self->video_area);
 		gtk_widget_hide (self->audio_icon);
 
-		gtk_widget_realize (self->video_area);
-		window = gtk_widget_get_window (self->video_area);
-		if (window != NULL) {
-			gdk_window_ensure_native (window);
-#ifdef GDK_WINDOWING_X11
-			self->video_xid = GDK_WINDOW_XID (window);
-#endif
+		/* Use appsink as video sink — extract frames and paint with Cairo */
+		appsink = gst_element_factory_make ("appsink", "pp-vsink");
+		if (appsink != NULL) {
+			caps = gst_caps_from_string ("video/x-raw, format=BGRx");
+			g_object_set (appsink,
+			              "caps", caps,
+			              "emit-signals", TRUE,
+			              "max-buffers", 2,
+			              "drop", TRUE,
+			              NULL);
+			gst_caps_unref (caps);
+
+			g_signal_connect (appsink, "new-sample",
+			                  G_CALLBACK (new_sample_cb), self);
+
+			g_object_set (self->pipeline, "video-sink", appsink, NULL);
 		}
 	}
 
 	bus = gst_pipeline_get_bus (GST_PIPELINE (self->pipeline));
-	if (!is_audio) {
-		gst_bus_set_sync_handler (bus,
-					 video_bus_sync_handler,
-					 self, NULL);
-	}
 	self->bus_watch_id = gst_bus_add_watch (bus,
 						video_bus_message_cb,
 						self);
@@ -1169,8 +1242,8 @@ load_media_preview (NemoPreviewPane *self,
 
 	gtk_button_set_image (GTK_BUTTON (self->play_btn),
 		gtk_image_new_from_icon_name (
-			"media-playback-pause-symbolic",
-			GTK_ICON_SIZE_SMALL_TOOLBAR));
+                        "media-playback-start-symbolic",
+                        GTK_ICON_SIZE_SMALL_TOOLBAR));
 	gtk_button_set_image (GTK_BUTTON (self->mute_btn),
 		gtk_image_new_from_icon_name (
 			self->video_muted ? "audio-volume-muted-symbolic"
@@ -1185,10 +1258,10 @@ load_media_preview (NemoPreviewPane *self,
 		g_source_remove (self->seek_update_id);
 	}
 	self->seek_update_id = g_timeout_add (250,
-					      seek_position_update_cb,
-					      self);
+                                              seek_position_update_cb,
+                                              self);
 
-	gst_element_set_state (self->pipeline, GST_STATE_PLAYING);
+        gst_element_set_state (self->pipeline, GST_STATE_PAUSED);
 
 	nemo_image_viewer_set_show_controls (self->image_viewer, FALSE);
 	gtk_stack_set_visible_child_name (GTK_STACK (self->stack), "video");
@@ -1397,6 +1470,13 @@ nemo_preview_pane_init (NemoPreviewPane *self)
 	self->cancellable = g_cancellable_new ();
 	self->details_vpaned_set = FALSE;
 
+#ifdef HAVE_GSTREAMER
+	g_mutex_init (&self->frame_mutex);
+	self->frame_surface = NULL;
+	self->video_width = 0;
+	self->video_height = 0;
+#endif
+
 	gtk_orientable_set_orientation (GTK_ORIENTABLE (self),
 				       GTK_ORIENTATION_VERTICAL);
 	gtk_widget_set_size_request (GTK_WIDGET (self), 250, -1);
@@ -1451,8 +1531,6 @@ nemo_preview_pane_init (NemoPreviewPane *self)
 		gtk_widget_set_app_paintable (self->video_area, TRUE);
 		gtk_widget_set_hexpand (self->video_area, TRUE);
 		gtk_widget_set_vexpand (self->video_area, TRUE);
-		g_signal_connect (self->video_area, "realize",
-				  G_CALLBACK (video_area_realize_cb), self);
 		g_signal_connect (self->video_area, "draw",
 				  G_CALLBACK (video_area_draw_cb), self);
 		gtk_box_pack_start (GTK_BOX (self->video_page_box),

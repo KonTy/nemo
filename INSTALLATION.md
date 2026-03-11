@@ -29,13 +29,13 @@ The AUR package automatically:
 
 1. Download latest `.deb` from [GitHub Releases](https://github.com/KonTy/nemo/releases)
    ```bash
-   # Example for v1.3.0:
-   wget https://github.com/KonTy/nemo/releases/download/v1.3.0/nemo-smpl_1.3.0-1_amd64.deb
+   # Example for v1.4.0:
+   wget https://github.com/KonTy/nemo/releases/download/v1.4.0/nemo-smpl_1.4.0-1_amd64.deb
    ```
 
 2. Install the package:
    ```bash
-   sudo dpkg -i nemo-smpl_1.3.0-1_amd64.deb
+   sudo dpkg -i nemo-smpl_1.4.0-1_amd64.deb
    sudo apt-get install -f  # Install missing dependencies if needed
    ```
 

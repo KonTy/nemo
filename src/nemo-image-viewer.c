@@ -21,7 +21,12 @@
 #include "nemo-image-viewer.h"
 
 #include <glib/gi18n.h>
+#include <string.h>
 #include <gdk-pixbuf/gdk-pixbuf.h>
+
+#ifdef HAVE_LIBRAW
+#include <libraw/libraw.h>
+#endif
 
 /* ------------------------------------------------------------------ */
 /* Private data                                                       */
@@ -408,11 +413,103 @@ nemo_image_viewer_load_file (NemoImageViewer *self,
 	g_return_val_if_fail (path != NULL, FALSE);
 
 	anim = gdk_pixbuf_animation_new_from_file (path, error);
-	if (anim == NULL)
-		return FALSE;
+	if (anim != NULL) {
+		set_animation (self, anim);
+		return TRUE;
+	}
 
-	set_animation (self, anim);
-	return TRUE;
+#ifdef HAVE_LIBRAW
+	/* Fallback: try loading as a camera RAW file (DNG, ARW, CR2, NEF, etc.) */
+	{
+		libraw_data_t *raw;
+		libraw_processed_image_t *img;
+		GdkPixbuf *pixbuf;
+		int ret;
+
+		raw = libraw_init (0);
+		if (raw == NULL)
+			return FALSE;
+
+		ret = libraw_open_file (raw, path);
+		if (ret != LIBRAW_SUCCESS) {
+			libraw_close (raw);
+			return FALSE;
+		}
+
+		/* Use half-size for faster preview, sRGB output */
+		raw->params.half_size = 1;
+		raw->params.use_camera_wb = 1;
+		raw->params.output_bps = 8;
+		raw->params.output_color = 1; /* sRGB */
+
+		ret = libraw_unpack (raw);
+		if (ret != LIBRAW_SUCCESS) {
+			libraw_close (raw);
+			return FALSE;
+		}
+
+		ret = libraw_dcraw_process (raw);
+		if (ret != LIBRAW_SUCCESS) {
+			libraw_close (raw);
+			return FALSE;
+		}
+
+		img = libraw_dcraw_make_mem_image (raw, &ret);
+		if (img == NULL || ret != LIBRAW_SUCCESS) {
+			libraw_close (raw);
+			return FALSE;
+		}
+
+		if (img->type != LIBRAW_IMAGE_BITMAP || img->colors != 3) {
+			libraw_dcraw_clear_mem (img);
+			libraw_close (raw);
+			return FALSE;
+		}
+
+		/* Create a GdkPixbuf from the RGB data.
+		 * We must copy because libraw owns the buffer. */
+		pixbuf = gdk_pixbuf_new (GDK_COLORSPACE_RGB, FALSE, 8,
+		                         img->width, img->height);
+		if (pixbuf != NULL) {
+			guint8 *dst = gdk_pixbuf_get_pixels (pixbuf);
+			int dst_stride = gdk_pixbuf_get_rowstride (pixbuf);
+			int src_stride = img->width * 3;
+			int row;
+
+			for (row = 0; row < (int) img->height; row++) {
+				memcpy (dst + row * dst_stride,
+				        img->data + row * src_stride,
+				        src_stride);
+			}
+		}
+
+		libraw_dcraw_clear_mem (img);
+		libraw_close (raw);
+
+		if (pixbuf == NULL)
+			return FALSE;
+
+		/* Clear previous gdk-pixbuf error since we succeeded via libraw */
+		if (error != NULL)
+			g_clear_error (error);
+
+		/* Wrap the static pixbuf in a single-frame animation */
+		{
+			GdkPixbufSimpleAnim *simple;
+			simple = gdk_pixbuf_simple_anim_new (
+				gdk_pixbuf_get_width (pixbuf),
+				gdk_pixbuf_get_height (pixbuf),
+				0.0f);
+			gdk_pixbuf_simple_anim_add_frame (simple, pixbuf);
+			anim = GDK_PIXBUF_ANIMATION (simple);
+		}
+		g_object_unref (pixbuf);
+		set_animation (self, anim);
+		return TRUE;
+	}
+#endif /* HAVE_LIBRAW */
+
+	return FALSE;
 }
 
 void

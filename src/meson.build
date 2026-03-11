@@ -125,11 +125,16 @@ endif
 if gstreamer_enabled
   nemo_deps += gstreamer
   nemo_deps += gstreamer_video
+  nemo_deps += gstreamer_app
 endif
 
 if gtk_layer_shell_enabled
   nemo_deps += gtk_layer_shell
   nemo_deps += wayland_client
+endif
+
+if libraw_enabled
+  nemo_deps += libraw
 endif
 
 nemo = executable('nemo',

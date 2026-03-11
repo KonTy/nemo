@@ -11,6 +11,8 @@ nemo-smpl
 | Feature | Stock Nemo | nemo-smpl |
 |---------|:----------:|:---------:|
 | F3 Quick Preview (text/image/media/hex/dir) | ❌ | ✅ |
+| Camera RAW preview (DNG, ARW, CR2, NEF…) | ❌ | ✅ |
+| Wayland video preview (sidebar + F3) | ❌ | ✅ |
 | Verify after copy (SHA-256) | ❌ | ✅ |
 | Preview Pane (Alt+F3) with GPS map | ❌ | ✅ |
 | Disk Usage Overview (Pareto charts) | ❌ | ✅ |

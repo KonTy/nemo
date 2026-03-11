@@ -1,7 +1,7 @@
 # Meson build file
 
 # https://github.com/linuxmint/nemo
-project('nemo', 'c', version : '1.3.0', meson_version : '>=0.56.0')
+project('nemo', 'c', version : '1.4.0', meson_version : '>=0.56.0')
 
 # 1. If the library code has changed at all since last release, then increment revision.
 # 2. If any interfaces have been added, then increment current and set revision to 0.
@@ -151,8 +151,16 @@ gstreamer_enabled = get_option('gstreamer')
 if gstreamer_enabled
   gstreamer = dependency('gstreamer-1.0',              version: '>=1.0')
   gstreamer_video = dependency('gstreamer-video-1.0',  version: '>=1.0')
+  gstreamer_app   = dependency('gstreamer-app-1.0',    version: '>=1.0')
 endif
 conf.set('HAVE_GSTREAMER', gstreamer_enabled)
+
+libraw_enabled = get_option('libraw')
+if libraw_enabled
+  libraw = dependency('libraw',                        version: '>=0.20', required: false)
+  libraw_enabled = libraw.found()
+endif
+conf.set('HAVE_LIBRAW', libraw_enabled)
 
 # make sure pango development files are installed
 pango = dependency('pango', version: '>=1.40.0')
