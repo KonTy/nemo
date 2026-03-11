@@ -40,6 +40,7 @@ void       nemo_preview_pane_set_file        (NemoPreviewPane *self,
 void       nemo_preview_pane_clear           (NemoPreviewPane *self);
 void       nemo_preview_pane_toggle_details  (NemoPreviewPane *self);
 void       nemo_preview_pane_toggle_mute     (NemoPreviewPane *self);
+void       nemo_preview_pane_toggle_play     (NemoPreviewPane *self);
 
 G_END_DECLS
 

@@ -1291,7 +1291,7 @@ nemo_window_key_press_event (GtkWidget *widget,
 		}
 	}
 
-	/* Alt+M toggles mute on the preview pane (configurable via
+	/* Ctrl+Shift+M toggles mute on the preview pane (configurable via
 	 * toggle-mute keybinding). */
 	if (nemo_keybinding_settings != NULL) {
 		g_autofree gchar *mute_accel = g_settings_get_string (nemo_keybinding_settings, "toggle-mute");
@@ -1304,6 +1304,26 @@ nemo_window_key_press_event (GtkWidget *widget,
 		    (event->state & gtk_accelerator_get_default_mod_mask ()) == mute_mods) {
 			if (window->details->preview_pane_visible) {
 				nemo_preview_pane_toggle_mute (
+					NEMO_PREVIEW_PANE (
+						window->details->preview_pane));
+				return TRUE;
+			}
+		}
+	}
+
+	/* Ctrl+Space toggles play/pause on the preview pane (configurable
+	 * via toggle-play keybinding). */
+	if (nemo_keybinding_settings != NULL) {
+		g_autofree gchar *play_accel = g_settings_get_string (nemo_keybinding_settings, "toggle-play");
+		guint play_key = 0;
+		GdkModifierType play_mods = 0;
+
+		gtk_accelerator_parse (play_accel, &play_key, &play_mods);
+
+		if (play_key != 0 && event->keyval == play_key &&
+		    (event->state & gtk_accelerator_get_default_mod_mask ()) == play_mods) {
+			if (window->details->preview_pane_visible) {
+				nemo_preview_pane_toggle_play (
 					NEMO_PREVIEW_PANE (
 						window->details->preview_pane));
 				return TRUE;

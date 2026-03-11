@@ -59,7 +59,8 @@ const NemoKeybindingEntry nemo_keybinding_entries[] = {
 	{ "show-sidebar",          "<Actions>/ShellActions/Show Hide Sidebar",  N_("Toggle Sidebar"),             N_("Window"), "F9",                        NULL, NULL },
 	{ "split-view",            "<Actions>/ShellActions/Show Hide Extra Pane", N_("Toggle Split View"),        N_("Window"), "<Control>F3",                   NULL, NULL },
 	{ "quick-preview",         "<Actions>/ShellActions/Quick Preview", N_("Quick File Preview"),        N_("Window"), "F3",                        NULL, NULL },
-	{ "toggle-mute",           NULL,                                   N_("Mute/Unmute Preview Audio"), N_("Window"), "<Alt>m",                     NULL, NULL },
+	{ "toggle-mute",           NULL,                                   N_("Mute/Unmute Preview Audio"), N_("Window"), "<Control><Shift>m",          NULL, NULL },
+	{ "toggle-play",           NULL,                                   N_("Play/Pause Preview Audio"),  N_("Window"), "<Control>space",              NULL, NULL },
 	{ "switch-pane",           "<Actions>/ShellActions/SplitViewNextPane",  N_("Switch to Other Pane"),       N_("Window"), "F6",                        NULL, NULL },
 	{ "same-location-pane",    "<Actions>/ShellActions/SplitViewSameLocation", N_("Same Location as Other Pane"), N_("Window"), "<Alt>s",                NULL, NULL },
 

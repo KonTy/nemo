@@ -1750,3 +1750,15 @@ nemo_preview_pane_toggle_mute (NemoPreviewPane *self)
 	}
 #endif
 }
+
+void
+nemo_preview_pane_toggle_play (NemoPreviewPane *self)
+{
+	g_return_if_fail (NEMO_IS_PREVIEW_PANE (self));
+
+#ifdef HAVE_GSTREAMER
+	if (self->play_btn != NULL) {
+		g_signal_emit_by_name (self->play_btn, "clicked");
+	}
+#endif
+}
