@@ -1738,3 +1738,15 @@ nemo_preview_pane_toggle_details (NemoPreviewPane *self)
 		gtk_widget_show (self->details_scroll);
 	}
 }
+
+void
+nemo_preview_pane_toggle_mute (NemoPreviewPane *self)
+{
+	g_return_if_fail (NEMO_IS_PREVIEW_PANE (self));
+
+#ifdef HAVE_GSTREAMER
+	if (self->mute_btn != NULL) {
+		g_signal_emit_by_name (self->mute_btn, "clicked");
+	}
+#endif
+}

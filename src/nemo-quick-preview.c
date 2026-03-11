@@ -165,6 +165,12 @@ on_key_press (GtkWidget *widget, GdkEventKey *event, gpointer data)
 			g_signal_emit_by_name (self->play_btn, "clicked");
 		}
 		return GDK_EVENT_STOP;
+	case GDK_KEY_m:
+	case GDK_KEY_M:
+		if (self->mode == PREVIEW_MEDIA && self->mute_btn != NULL) {
+			g_signal_emit_by_name (self->mute_btn, "clicked");
+		}
+		return GDK_EVENT_STOP;
 	case GDK_KEY_f:
 	case GDK_KEY_F:
 		if (gdk_window_get_state (gtk_widget_get_window (widget)) & GDK_WINDOW_STATE_FULLSCREEN)

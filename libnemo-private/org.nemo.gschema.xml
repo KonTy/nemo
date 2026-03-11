@@ -997,6 +997,10 @@
       <default>'F3'</default>
       <summary>Quick file preview</summary>
     </key>
+    <key name="toggle-mute" type="s">
+      <default>'&lt;Alt&gt;m'</default>
+      <summary>Mute/unmute preview audio</summary>
+    </key>
     <key name="switch-pane" type="s">
       <default>'F6'</default>
       <summary>Switch to other pane</summary>

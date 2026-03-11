@@ -1291,6 +1291,26 @@ nemo_window_key_press_event (GtkWidget *widget,
 		}
 	}
 
+	/* Alt+M toggles mute on the preview pane (configurable via
+	 * toggle-mute keybinding). */
+	if (nemo_keybinding_settings != NULL) {
+		g_autofree gchar *mute_accel = g_settings_get_string (nemo_keybinding_settings, "toggle-mute");
+		guint mute_key = 0;
+		GdkModifierType mute_mods = 0;
+
+		gtk_accelerator_parse (mute_accel, &mute_key, &mute_mods);
+
+		if (mute_key != 0 && event->keyval == mute_key &&
+		    (event->state & gtk_accelerator_get_default_mod_mask ()) == mute_mods) {
+			if (window->details->preview_pane_visible) {
+				nemo_preview_pane_toggle_mute (
+					NEMO_PREVIEW_PANE (
+						window->details->preview_pane));
+				return TRUE;
+			}
+		}
+	}
+
 	/* Insert key = New Folder (configurable via new-folder-alt) */
 	if (nemo_keybinding_settings != NULL) {
 		g_autofree gchar *nf_accel = g_settings_get_string (nemo_keybinding_settings, "new-folder-alt");

@@ -259,6 +259,54 @@
         <child>
           <object class="GtkShortcutsGroup">
             <property name="visible">True</property>
+            <property name="title" translatable="yes" context="shortcut window">Preview</property>
+            <child>
+              <object class="GtkShortcutsShortcut">
+                <property name="visible">True</property>
+                <property name="title" translatable="yes" context="shortcut window">Quick preview</property>
+                <property name="accelerator">F3</property>
+              </object>
+            </child>
+            <child>
+              <object class="GtkShortcutsShortcut">
+                <property name="visible">True</property>
+                <property name="title" translatable="yes" context="shortcut window">Toggle preview pane</property>
+                <property name="accelerator">&lt;Alt&gt;F3</property>
+              </object>
+            </child>
+            <child>
+              <object class="GtkShortcutsShortcut">
+                <property name="visible">True</property>
+                <property name="title" translatable="yes" context="shortcut window">Play/Pause (in preview)</property>
+                <property name="accelerator">space</property>
+              </object>
+            </child>
+            <child>
+              <object class="GtkShortcutsShortcut">
+                <property name="visible">True</property>
+                <property name="title" translatable="yes" context="shortcut window">Mute/Unmute preview audio</property>
+                <property name="accelerator">&lt;Alt&gt;M</property>
+              </object>
+            </child>
+            <child>
+              <object class="GtkShortcutsShortcut">
+                <property name="visible">True</property>
+                <property name="title" translatable="yes" context="shortcut window">Toggle fullscreen (in preview)</property>
+                <property name="accelerator">F</property>
+              </object>
+            </child>
+            <child>
+              <object class="GtkShortcutsShortcut">
+                <property name="visible">True</property>
+                <property name="title" translatable="yes" context="shortcut window">Toggle preview details</property>
+                <property name="accelerator">&lt;Shift&gt;&lt;Alt&gt;F3</property>
+              </object>
+            </child>
+          </object>
+        </child>
+        <child>
+          <object class="GtkShortcutsGroup">
+            <property name="visible">True</property>
             <property name="title" translatable="yes" context="shortcut window">View</property>
             <child>
               <object class="GtkShortcutsShortcut">
