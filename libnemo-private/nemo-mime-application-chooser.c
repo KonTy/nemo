@@ -380,7 +380,7 @@ custom_app_set (NemoMimeApplicationChooser *chooser,
 static char *
 get_extension (const char *basename)
 {
-	char *p;
+	const char *p;
 
 	p = strrchr (basename, '.');
 

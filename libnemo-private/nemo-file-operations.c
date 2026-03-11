@@ -349,7 +349,7 @@ shorten_utf8_string (const char *base, int reduce_by_num_bytes)
 
 	p = base;
 	while (len) {
-		char *next;
+		const char *next;
 		next = g_utf8_next_char (p);
 		if (next - p > len || *next == '\0') {
 			break;

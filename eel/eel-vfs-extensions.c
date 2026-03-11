@@ -150,7 +150,7 @@ eel_filename_get_extension_offset (const char *filename)
 	/* basename must have at least one char */
 	start = filename + 1;
 
-	end = strrchr (start, '.');
+	end = (char *) strrchr (start, '.');
 	if (end == NULL || end[1] == '\0') {
 		return NULL;
 	}

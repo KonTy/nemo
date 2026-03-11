@@ -712,28 +712,6 @@ action_preview_pane_callback (GtkAction *action,
 }
 
 static void
-action_preview_pane_grow_callback (GtkAction *action,
-                                   gpointer user_data)
-{
-	if (NEMO_IS_DESKTOP_WINDOW (user_data)) {
-		return;
-	}
-
-	nemo_window_preview_pane_resize (NEMO_WINDOW (user_data), 50);
-}
-
-static void
-action_preview_pane_shrink_callback (GtkAction *action,
-                                     gpointer user_data)
-{
-	if (NEMO_IS_DESKTOP_WINDOW (user_data)) {
-		return;
-	}
-
-	nemo_window_preview_pane_resize (NEMO_WINDOW (user_data), -50);
-}
-
-static void
 action_quick_preview_callback (GtkAction *action,
                                gpointer user_data)
 {
