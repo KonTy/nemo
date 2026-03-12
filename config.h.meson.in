@@ -1,6 +1,10 @@
 #pragma once
 // config.h.in.  Generated from configure.ac by autoheader.
 
+// smplOS enhanced features (parent folder entry, media shortcuts, etc.)
+// Comment out or remove to build without smplOS additions.
+#define NEMO_SMPL 1
+
 // Define to the version of this package.
 #mesondefine VERSION
 
