@@ -1,7 +1,7 @@
 # nemo-smpl — Features & Release Notes
 
-**Current Version:** v1.4.0  
-**Release Date:** March 10, 2026
+**Current Version:** v1.4.2  
+**Release Date:** March 11, 2026
 
 ---
 
@@ -116,6 +116,22 @@ Double Commander-style instant file viewer:
 ---
 
 ## Version History
+
+### v1.4.2 (March 2026)
+
+- **`#ifdef NEMO_SMPL` compile guards**: All parent-folder-entry code wrapped with compile-time guards for clean upstream separation — comment out `#define NEMO_SMPL 1` in `config.h.meson.in` to build without smplOS additions
+- **Sidebar cross-section keyboard navigation**: Arrow keys in sidebar now cross section boundaries (e.g. from Bookmarks into Devices) instead of stopping at section edges
+- **"..' parent folder entry**: Optional `..` row pinned at top of list view for navigating to parent directory — toggle via View menu or GSettings key `show-parent-folder-entry`
+- Upstream sync: confirmed 0 commits behind upstream `linuxmint/nemo` master
+
+### v1.4.1 (March 2026)
+
+- **Media keyboard shortcuts**: Ctrl+M = mute/unmute preview audio, Ctrl+Space = play/pause preview pane, M/Space in F3 dialog
+- **Timecode display**: live `hh:mm:ss:ff` timestamp in F3 Quick Preview with auto-detected framerate
+- **Frame stepping**: `<` (comma) / `>` (period) step back/forward one frame in F3 preview
+- **Sidebar focus on F9**: F9 toggle now selects first sidebar node (Overview) and clears file view selection on show; restores file view focus on hide
+- Fixed 4 compiler warnings across 3 files
+- Keybinding swap: Ctrl+M = mute (was create symlink), Ctrl+Shift+M = create symlink (was mute)
 
 ### v1.4.0 (March 2026)
 
