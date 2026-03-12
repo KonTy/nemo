@@ -583,7 +583,9 @@ action_show_hide_sidebar_callback (GtkAction *action,
 			nemo_window_show_sidebar (window);
 
 			/* Focus the first row in the sidebar tree view
-			 * so keyboard navigation works immediately */
+			 * so keyboard navigation works immediately.
+			 * Also clear file view selection to draw
+			 * attention to the sidebar. */
 			if (window->details->sidebar != NULL) {
 				GList *children = gtk_container_get_children (
 					GTK_CONTAINER (window->details->sidebar));
@@ -603,9 +605,25 @@ action_show_hide_sidebar_callback (GtkAction *action,
 					}
 				}
 				g_list_free (children);
+
+				/* Clear selection in the active file view */
+				{
+					NemoWindowSlot *slot = nemo_window_get_active_slot (window);
+					if (slot != NULL && slot->content_view != NULL) {
+						nemo_view_set_selection (slot->content_view, NULL);
+					}
+				}
 			}
 		} else {
 			nemo_window_hide_sidebar (window);
+
+			/* Return focus to the file view when sidebar hides */
+			{
+				NemoWindowSlot *slot = nemo_window_get_active_slot (window);
+				if (slot != NULL && slot->content_view != NULL) {
+					nemo_view_grab_focus (slot->content_view);
+				}
+			}
 		}
 	}
 }
