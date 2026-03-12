@@ -3527,8 +3527,10 @@ find_prev_or_next_row (NemoPlacesSidebar *sidebar,
 		       gboolean go_up)
 {
 	GtkTreeModel *model = GTK_TREE_MODEL (sidebar->store_filter);
+	GtkTreeIter saved = *iter;
 	gboolean res;
 	int place_type;
+	int section_type;
 
 	if (go_up) {
 		res = gtk_tree_model_iter_previous (model, iter);
@@ -3547,9 +3549,56 @@ find_prev_or_next_row (NemoPlacesSidebar *sidebar,
 				res = gtk_tree_model_iter_next (model, iter);
 			}
 		}
+		return res;
 	}
 
-	return res;
+	/* iter is now invalid after failed iter_next/iter_previous.
+	 * Restore from saved copy so we can look up the parent. */
+	*iter = saved;
+
+	/* No more siblings — cross into the next/previous section.
+	 * Walk up to the parent heading, move to the adjacent heading,
+	 * then descend into its first (down) or last (up) child. */
+	{
+		GtkTreeIter parent;
+		if (!gtk_tree_model_iter_parent (model, &parent, iter)) {
+			return FALSE; /* already at top level */
+		}
+
+		if (go_up) {
+			/* Move to the previous heading */
+			while (gtk_tree_model_iter_previous (model, &parent)) {
+				gtk_tree_model_get (model, &parent,
+						    PLACES_SIDEBAR_COLUMN_ROW_TYPE, &place_type,
+						    PLACES_SIDEBAR_COLUMN_SECTION_TYPE, &section_type,
+						    -1);
+				if (place_type == PLACES_HEADING &&
+				    cat_is_expanded (sidebar, (SectionType) section_type)) {
+					int n = gtk_tree_model_iter_n_children (model, &parent);
+					if (n > 0) {
+						gtk_tree_model_iter_nth_child (model, iter, &parent, n - 1);
+						return TRUE;
+					}
+				}
+			}
+		} else {
+			/* Move to the next heading */
+			while (gtk_tree_model_iter_next (model, &parent)) {
+				gtk_tree_model_get (model, &parent,
+						    PLACES_SIDEBAR_COLUMN_ROW_TYPE, &place_type,
+						    PLACES_SIDEBAR_COLUMN_SECTION_TYPE, &section_type,
+						    -1);
+				if (place_type == PLACES_HEADING &&
+				    cat_is_expanded (sidebar, (SectionType) section_type)) {
+					if (gtk_tree_model_iter_children (model, iter, &parent)) {
+						return TRUE;
+					}
+				}
+			}
+		}
+	}
+
+	return FALSE;
 }
 
 static gboolean
