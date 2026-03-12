@@ -426,6 +426,27 @@ activate_selected_items (NemoListView *view)
 		view->details->renaming_file_activate_timeout = 0;
 	}
 
+	/* Check if the activated item is the ".." parent entry */
+#ifdef NEMO_SMPL
+	{
+		GtkTreePath *cursor_path = NULL;
+		gtk_tree_view_get_cursor (view->details->tree_view, &cursor_path, NULL);
+		if (cursor_path != NULL) {
+			GtkTreeIter iter;
+			if (gtk_tree_model_get_iter (GTK_TREE_MODEL (view->details->model), &iter, cursor_path)) {
+				if (nemo_list_model_is_parent_entry (view->details->model, &iter)) {
+					NemoWindowSlot *slot = nemo_view_get_nemo_window_slot (NEMO_VIEW (view));
+					nemo_window_slot_go_up (slot, 0);
+					gtk_tree_path_free (cursor_path);
+					nemo_file_list_free (file_list);
+					return;
+				}
+			}
+			gtk_tree_path_free (cursor_path);
+		}
+	}
+#endif /* NEMO_SMPL */
+
 	nemo_view_activate_files (NEMO_VIEW (view),
 				      file_list,
 				      0, TRUE);
@@ -2832,6 +2853,9 @@ create_and_set_up_tree_view (NemoListView *view)
     g_signal_connect_swapped (gtk_settings, "notify::gtk-font-name", G_CALLBACK (update_date_fonts), view);
     g_signal_connect_swapped (nemo_preferences, "changed::" NEMO_PREFERENCES_DATE_FONT_CHOICE, G_CALLBACK (update_date_fonts), view);
     g_signal_connect_swapped (gnome_interface_preferences, "changed::" NEMO_PREFERENCES_MONO_FONT_NAME, G_CALLBACK (update_date_fonts), view);
+#ifdef NEMO_SMPL
+    g_signal_connect_swapped (nemo_preferences, "changed::" NEMO_PREFERENCES_SHOW_PARENT_FOLDER_ENTRY, G_CALLBACK (nemo_list_view_refresh_parent_entry), view);
+#endif
 	nemo_column_list_free (nemo_columns);
 
 	default_visible_columns = g_settings_get_strv (nemo_list_view_preferences,
@@ -4361,6 +4385,32 @@ list_view_notify_clipboard_info (NemoClipboardMonitor *monitor,
 	}
 }
 
+#ifdef NEMO_SMPL
+void
+nemo_list_view_refresh_parent_entry (NemoListView *view)
+{
+	/* Add or remove the '..' entry based on current preference */
+	nemo_list_model_remove_parent_entry (view->details->model);
+	if (g_settings_get_boolean (nemo_preferences, NEMO_PREFERENCES_SHOW_PARENT_FOLDER_ENTRY)) {
+		char *uri = nemo_view_get_uri (NEMO_VIEW (view));
+		if (uri != NULL) {
+			GFile *location = g_file_new_for_uri (uri);
+			GFile *parent = g_file_get_parent (location);
+			if (parent != NULL) {
+				NemoFile *parent_file = nemo_file_get (parent);
+				if (parent_file != NULL) {
+					nemo_list_model_add_parent_entry (view->details->model, parent_file);
+					nemo_file_unref (parent_file);
+				}
+				g_object_unref (parent);
+			}
+			g_object_unref (location);
+			g_free (uri);
+		}
+	}
+}
+#endif /* NEMO_SMPL */
+
 static void
 nemo_list_view_end_loading (NemoView *view,
 				gboolean all_files_seen)
@@ -4377,6 +4427,11 @@ nemo_list_view_end_loading (NemoView *view,
 	info = nemo_clipboard_monitor_get_clipboard_info (monitor);
 
 	list_view_notify_clipboard_info (monitor, info, list_view);
+
+	/* Add ".." parent folder entry if enabled in preferences */
+#ifdef NEMO_SMPL
+	nemo_list_view_refresh_parent_entry (list_view);
+#endif
 
 	/* In split-pane mode, if nothing is selected after loading,
 	 * select and cursor the first row so there's always a visible

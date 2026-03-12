@@ -65,6 +65,9 @@
 #define NEMO_ACTION_ZOOM_OUT "Zoom Out"
 #define NEMO_ACTION_ZOOM_NORMAL "Zoom Normal"
 #define NEMO_ACTION_SHOW_HIDDEN_FILES "Show Hidden Files"
+#ifdef NEMO_SMPL
+#define NEMO_ACTION_SHOW_PARENT_FOLDER_ENTRY "Show Parent Folder Entry"
+#endif
 #define NEMO_ACTION_CLOSE "Close"
 #define NEMO_ACTION_SEARCH "Search"
 #define NEMO_ACTION_FOLDER_WINDOW "Folder Window"

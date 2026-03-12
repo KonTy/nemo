@@ -327,6 +327,11 @@
       <summary>Whether to show hidden files</summary>
       <description>If set to true, then hidden files are shown by default in the file manager.  Hidden files are either dotfiles, listed in the folder's .hidden file or backup files ending with a tilde (~).</description>
     </key>
+    <key name="show-parent-folder-entry" type="b">
+      <default>false</default>
+      <summary>Whether to show a ".." parent folder entry at the top of file lists</summary>
+      <description>If set to true, a ".." entry is shown at the top of directory listings in list view, allowing quick navigation to the parent folder by double-clicking it.</description>
+    </key>
     <key name="show-full-path-titles" type="b">
       <default>false</default>
       <summary>Whether to show the full path of the current view in the title bar and tab bars</summary>

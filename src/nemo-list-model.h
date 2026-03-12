@@ -141,4 +141,10 @@ gboolean          nemo_list_model_get_temporarily_disable_sort (NemoListModel *m
 void              nemo_list_model_set_expanding                (NemoListModel *model, NemoDirectory *directory);
 void              nemo_list_model_set_view_directory           (NemoListModel *model, NemoDirectory *dir);
 void              nemo_list_model_set_expansion_enabled        (NemoListModel *model, gboolean enabled);
+
+#ifdef NEMO_SMPL
+void              nemo_list_model_add_parent_entry             (NemoListModel *model, NemoFile *parent_file);
+void              nemo_list_model_remove_parent_entry          (NemoListModel *model);
+gboolean          nemo_list_model_is_parent_entry              (NemoListModel *model, GtkTreeIter *iter);
+#endif /* NEMO_SMPL */
 #endif /* NEMO_LIST_MODEL_H */

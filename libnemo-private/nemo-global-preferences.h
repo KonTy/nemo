@@ -41,6 +41,9 @@ G_BEGIN_DECLS
 
 /* Display  */
 #define NEMO_PREFERENCES_SHOW_HIDDEN_FILES			"show-hidden-files"
+#ifdef NEMO_SMPL
+#define NEMO_PREFERENCES_SHOW_PARENT_FOLDER_ENTRY		"show-parent-folder-entry"
+#endif
 #define NEMO_PREFERENCES_SHOW_ADVANCED_PERMISSIONS		"show-advanced-permissions"
 #define NEMO_PREFERENCES_SHOW_PREVIEW_PANE			"show-preview-pane"
 #define NEMO_PREFERENCES_DATE_FORMAT            "date-format"
